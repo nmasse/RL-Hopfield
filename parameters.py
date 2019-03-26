@@ -22,9 +22,10 @@ par = {
 	'w_init'				: 0.02,
 
 	# Network shape
-	'num_motion_tuned'		: 24,
+	'num_nav_tuned'			: 4,		# Must be 4 for maze task (replaced motion neurons)
 	'num_fix_tuned'			: 1,
 	'num_rule_tuned'		: 0,
+	'num_rew_tuned'			: 10,		# For reward vector in maze task
 	'n_hidden'				: 200,
 	'n_val'					: 1,
 	'n_latent'				: 40,
@@ -59,6 +60,13 @@ par = {
 	'task_list'				: [a for a in range(1,15)], #[a for a in range(49)],
 	'dead_trials'			: 90,
 	'temporal_div'			: 1,
+
+	# Maze task specs
+	'rewards'				: [1.],
+	'num_actions'			: 5,		# The number of different actions available to the agent
+	'room_width'			: 6,
+	'room_height'			: 4,
+	'use_default_rew_locs'	: False,
 
 	# RL parameters
 	'fix_break_penalty'     : -1.,
@@ -145,11 +153,18 @@ def update_dependencies():
 		par['reward_map_matrix'][val,:] = key
 
 	# Set input and output sizes
-	par['n_input']  = par['num_motion_tuned'] + par['num_fix_tuned'] + par['num_rule_tuned']
+	par['n_input']  = par['num_nav_tuned'] + par['num_fix_tuned'] + par['num_rew_tuned'] + par['num_rule_tuned']
+	par['n_output'] = par['num_actions']
 	par['n_pol'] = par['num_motion_dirs'] + 1
 
 	# Set trial step length
 	par['num_time_steps'] = par['trial_length']//par['dt']
+
+	# Specify one-hot vectors matching with each reward for maze task
+	condition = True
+	while condition:
+		par['reward_vectors'] = np.random.choice([0,1], size=[len(par['rewards']), par['num_rew_tuned']])
+		condition = (np.mean(np.std(par['reward_vectors'], axis=0)) == 0.) and len(par['rewards']) > 1
 
 	# Set up standard LSTM weights and biases
 	LSTM_weight = lambda size : np.random.uniform(-par['LSTM_init'], par['LSTM_init'], size=size).astype(np.float32)
@@ -195,7 +210,7 @@ def update_dependencies():
 	#n_input_ctl = par['n_pol']*par['num_reward_types']*par['num_time_steps']//par['temporal_div'] \
 	# 	+ par['n_pol'] + par['n_val'] + par['n_input']
 	n_input_ctl = par['n_pol']*par['num_reward_types'] \
-	 	+ par['n_pol'] + par['n_val'] + par['n_input']
+		+ par['n_pol'] + par['n_val'] + par['n_input']
 
 	n_input_ctl = par['n_pol']*par['num_reward_types'] + par['n_latent']
 	#n_input_ctl = 33 + par['n_pol'] + par['n_val'] + par['n_pol']*par['n_val']
@@ -233,7 +248,7 @@ def update_dependencies():
 
 
 
-	load_encoder_weights()
+	# load_encoder_weights()
 
 update_dependencies()
 print('--> Parameters successfully loaded.\n')
