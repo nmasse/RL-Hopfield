@@ -78,7 +78,7 @@ class Model:
 		Project the encoded stimulus into the Hopfield network, retrieve predicted action/values
 		"""
 		x_mapped = x @ self.W_stim_read
-		x_read = self.hopefield.read_fast_weights(x_mapped)
+		x_read = self.read_hopfield(x_mapped)
 		x_read = tf.reshape(x_read, [par['batch_size'], par['num_reward_types']*par['n_pol'], \
 			par['num_time_steps']//par['temporal_div']])
 		x_read = tf.reduce_sum(x_read, axis = 2)
@@ -135,15 +135,14 @@ class Model:
 		self.train_RL = adam_optimizer.minimize(self.loss, var_list = RL_vars)
 
 
-	def read_hopfield(self, h):
+	def read_hopfield(self):
 
-		h = tf.nn.relu(h)
-		h_hat = tf.zeros_like(h)
+		h_hat = tf.zeros_like(self.latent)
 		alpha = 0.5
 		cycles = 6
 		for n in range(cycles):
 
-			h_hat = alpha*h_hat + (1 - alpha) * tf.einsum('ij, ijk->ik', h, self.H_stim) + h
+			h_hat = alpha*h_hat + (1-alpha)*tf.einsum('ij, ijk->ik', self.latent, self.H_stim) + self.latent
 			h_hat = tf.nn.relu(h_hat)
 			h_hat = tf.minimum(100., h_hat)
 
@@ -152,22 +151,23 @@ class Model:
 		return pred_action
 
 
-	def write_hopfield(self, h, a, r):
+	def write_hopfield(self):
 
-		h = tf.nn.relu(h)
-		hh = tf.einsum('ij,ik->ijk',h,h)
-		h_old_new = tf.einsum('ij,ik->ijk', h_old, h)
+		action_reward = tf.concat([self.action_pl*self.reward_pl, \
+			self.action_pl*(1 - self.reward_pl)], axis = -1)
+		hh = tf.einsum('ij,ik->ijk', self.latent, self.latent)
+		h_old_new = tf.einsum('ij,ik->ijk', h_old, self.latent)
 		#h_old_new *= par['H_old_new_mask']
 
 		if par['covariance_method']:
 			H_stim += (h_old_new + hh)/par['n_hopf_stim']
 		else:
-			h1 = tf.einsum('ij, jk->ijk', h, self.H_stim_mask)
+			h1 = tf.einsum('ij, jk->ijk', self.latent, self.H_stim_mask)
 			c = tf.einsum('ijk,ikm->ijm', h1, self.H_stim)
 			H_stim_grad = (h_old_new + hh - c - tf.transpose(c,[0,2,1]))/par['n_hopf_stim']
 			H_stim_grad = tf.einsum('ijk,jk->ijk', H_stim_grad, self.H_stim_mask)
 
-		H_act_grad = tf.einsum('ij, ik->ijk', h, a)
+		H_act_grad = tf.einsum('ij, ik->ijk', self.latent, action_reward)
 		# DO I INCLUDE THIS NEXT PART?
 		#H_act += tf.einsum('ij, ik->ijk', a_old, h)
 
@@ -177,7 +177,7 @@ class Model:
 		self.update_hopfield = tf.group(*[update_H_stim, update_H_act])
 
 
-def main(gpu_id=None):
+def main(gpu_id = None):
 
 	if gpu_id is not None:
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
@@ -215,8 +215,12 @@ def main(gpu_id=None):
 					feed_dict = {stim: stimulus})
 
 				# Choose action, calculate reward and determine next state
+				reward 			= 0. # CALCULATE REWARD
 				action_index	= np.random.multinomial(pol, 1)
 				action 			= np.one_hot(tf.squeeze(action_index), par['n_pol'])
+
+				sess.run([model.update_hopfield], \
+					feed_dict = {stim: stimulus, action: action, reward: reward})
 
 				stimulus, reward = rooms
 				total_reward += reward
