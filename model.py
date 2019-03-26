@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 # Model modules
 from parameters_v10 import *
 import stimulus_sequence
-import AdamOpt_sequence as AdamOpt
 import time
 
 # Match GPU IDs to nvidia-smi command
@@ -25,23 +24,118 @@ os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 
-class Hopfield:
+class Model:
 
-	def __init__(self, stim_size, action_size, reward_size):
+	def __init__(self, stim, reward, action, prev_val):
 
+		# Placeholders
+		self.stim_pl		= stim
+		self.reward_pl		= reward
+		self.action_pl		= action
+		self.prev_val_pl	= prev_val
+
+		self.declare_variables()
+		self.stimulus_encoding()
+		self.policy()
+		self.update_encoder_weights()
+		self.update_policy_weights()
+
+
+	def declare_variables(self):
+
+		self.var_dict = {}
+		encoding_prefixes   = ['W_enc', 'W_dec', 'b_enc']
+		RL_prefixes 		= ['W0', 'W1', 'b0', 'b1' ,'W_pol', 'W_val', 'b_pol', 'b_val']
+
+		with tf.variable_scope('encoding'):
+			for p in encoding_prefixes:
+				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
+		with tf.variable_scope('RL'):
+			for p in RL_prefixes:
+				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
 		with tf.variable_scope('hopfield'):
-			tf.get_variable(name="b1", shape=[128], initializer=tf.zeros_initializer())
 			self.H_stim = tf.get_variable('H_stim', shape = [par['batch_size'], par['n_hopf_stim'], \
-				par['n_hopf_stim']], initializer=tf.zeros_initializer())
+				par['n_hopf_stim']], initializer=tf.zeros_initializer(), trainable = False)
 			self.H_act_f = tf.get_variable('H_act_f', shape = [par['batch_size'], par['n_hopf_stim'], \
-				par['n_hopf_act']], initializer=tf.zeros_initializer())
+				par['n_hopf_act']], initializer=tf.zeros_initializer(), trainable = False)
 			self.H_act_r = tf.get_variable('H_act_r', shape = [par['batch_size'], par['n_hopf_act'], \
-				par['n_hopf_stim']], initializer=tf.zeros_initializer())
+				par['n_hopf_stim']], initializer=tf.zeros_initializer(), trainable = False)
 
+		self.W_stim_write = tf.constant(par['W_stim_write'])
+		self.W_act_write = tf.constant(par['W_act_write'])
+		self.W_stim_read = tf.constant(par['W_stim_read'])
 		self.H_stim_mask = tf.constant(par['H_stim_mask'])
 
+	def stimulus_encoding():
 
-	def read_fast_weights(self, h):
+		"""
+		Encode the stimulus into a sparse representation
+		"""
+		self.latent = tf.nn.relu(self.stim_pl @ self.var_dict['W_enc'] + self.var_dict['b_enc'])
+		self.stim_hat = x @ self.var_dec['W_enc']
+
+		"""
+		Project the encoded stimulus into the Hopfield network, retrieve predicted action/values
+		"""
+		x_mapped = x @ self.W_stim_read
+		x_read = self.hopefield.read_fast_weights(x_mapped)
+		x_read = tf.reshape(x_read, [par['batch_size'], par['num_reward_types']*par['n_pol'], \
+			par['num_time_steps']//par['temporal_div']])
+		x_read = tf.reduce_sum(x_read, axis = 2)
+		self.encoding_out = tf.concat([x_read, x], axis = 1) # main output
+
+
+	def policy(self):
+
+
+		x1 = tf.nn.relu(self.encoding_out @ self.var_dict['W0'] + self.var_dict['b0'])
+		#x1 = tf.layers.dropout(x1, rate = par['drop_rate'], training = True)
+		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b2'])
+
+		self.pol_out = x2 @ self.var_dict['W_pol'] + self.var_dict['b_pol']
+		self.val_out = x2 @ self.var_dict['W_val'] + self.var_dict['b_val']
+
+
+	def update_encoder_weights(self):
+
+		"""
+		Update encoding weights
+		"""
+		self.adam_optimizer = tf.train.AdamOptimizer(learning_rate = par['learning_rate'])
+		encoding_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'encoding')
+
+		self.reconstruction_loss = tf.reduce_mean(tf.square(self.stim_pl - self.stim_hat))
+		self.weight_loss = tf.reduce_mean(tf.abs(self.var_dict['W_enc'])) + tf.reduce_mean(tf.abs(self.var_dict['W_dec']))
+		latent_mask = np.ones((par['n_latent'], par['n_latent']),dtype = np.float32) - np.eye((par['n_latent']),dtype = np.float32)
+		self.sparsity_loss = tf.reduce_mean(latent_mask*(tf.transpose(self.latent) @ self.latent))
+		self.loss = self.reconstruction_loss + par['sparsity_cost']*self.sparsity_loss \
+			+ par['weight_cost']*self.weight_loss
+		self.train_encoder = self.adam_optimizer.minimize(self.loss, var_lis = encoding_vars)
+
+
+	def update_policy_weights(self):
+
+		"""
+		Perform gradient descent
+		"""
+		RL_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='RL')
+
+		terminal_state = tf.cast(tf.logical_not(tf.equal(self.reward_pl, tf.constant(0.))), tf.float32)
+		advantage = self.prev_val_pl - self.reward_pl - par['discount_rate']*self.val_out*terminal_state
+		self.val_loss = 0.5*tf.reduce_mean(tf.square(advantage))
+
+		pol_out_softmax   = tf.nn.softmax(self.pol_out, axis = -1)
+		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage)*action \
+			*tf.log(1e-6 + pol_out_softmax)
+		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(pol_out_softmax \
+			*tf.log(1e-6 + pol_out_softmax), axis = -1))
+
+		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
+			- par['entropy_cost']*self.ent_loss
+		self.train_RL = adam_optimizer.minimize(self.loss, var_list = RL_vars)
+
+
+	def read_hopfield(self, h):
 
 		h = tf.nn.relu(h)
 		h_hat = tf.zeros_like(h)
@@ -57,10 +151,8 @@ class Hopfield:
 
 		return pred_action
 
-	def write_fast_weights(self, h, a):
 
-		x = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'x_hopfield')
-		a = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'a_hopfield')
+	def write_hopfield(self, h, a, r):
 
 		h = tf.nn.relu(h)
 		hh = tf.einsum('ij,ik->ijk',h,h)
@@ -85,122 +177,6 @@ class Hopfield:
 		self.update_hopfield = tf.group(*[update_H_stim, update_H_act])
 
 
-class RL:
-
-	def __init__(self):
-
-		self.declare_variables()
-		self.forward_pass()
-
-	def declare_variables(self):
-
-		self.var_dict = {}
-		RL_prefixes 		= ['W0', 'W1', 'b0', 'b1' ,'W_pol', 'W_val', 'b_pol', 'b_val']
-
-		with tf.variable_scope('RL'):
-			for p in RL_prefixes:
-				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
-
-		self.W_stim_write = tf.constant(par['W_stim_write'])
-		self.W_act_write = tf.constant(par['W_act_write'])
-
-
-	def forward_pass(self):
-
-		"""
-		Compute the policy/value functions and choose an action from the encoded
-		stimulus and read-out from the Hopfield network
-		"""
-		x0 = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'x0')
-		x1 = tf.nn.relu(x0 @ self.var_dict['W0'] + self.var_dict['b0'])
-		#x1 = tf.layers.dropout(x1, rate = par['drop_rate'], training = True)
-		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b2'])
-
-		self.pol_out = x2 @ self.var_dict['W_pol'] + self.var_dict['b_pol']
-		self.val_out = x2 @ self.var_dict['W_val'] + self.var_dict['b_val']
-
-		"""
-		Perform gradient descent
-		"""
-		action   = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
-		reward 	 = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
-		prev_val = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
-
-		RL_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='RL')
-		adam_optimizer = tf.train.AdamOptimizer(learning_rate = par['learning_rate'])
-
-		terminal_state = tf.cast(tf.logical_not(tf.equal(reward, tf.constant(0.))), tf.float32)
-		advantage = prev_val - reward - par['discount_rate']*self.val_out*terminal_state
-		self.val_loss = 0.5*tf.reduce_mean(mask_static*tf.square(advantage))
-
-		pol_out_softmax   = tf.nn.softmax(self.pol_out, axis = -1)
-		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage)*action \
-			*tf.log(1e-6 + pol_out_softmax)
-		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(pol_out_softmax \
-			*tf.log(1e-6 + pol_out_softmax), axis = -1))
-
-		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
-			- par['entropy_cost']*self.ent_loss
-		self.train_RL = adam_optimizer.minimize(self.loss, var_list = RL_vars))
-
-
-
-class Encoder:
-
-	def __init__(self):
-
-		self.declare_variables()
-		self.forward_pass()
-
-	def declare_variables(self):
-
-		self.var_dict = {}
-		encoding_prefixes   = ['W_enc', 'W_dec', 'b_enc']
-
-		with tf.variable_scope('encoding'):
-			for p in encoding_prefixes:
-				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
-
-		self.W_stim_read = tf.constant(par['W_stim_read'])
-		self.hopfield = Hopfield()
-
-
-	def forward_pass(self):
-
-
-		"""
-		Encode the stimulus into a sparse representation
-		"""
-		stim = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
-		x = tf.nn.relu(stim @ self.var_dict['W_enc'] + self.var_dict['b_enc'])
-		stim_hat = x @ self.var_dec['W_enc']
-
-		self.reconstruction_loss = tf.reduce_mean(tf.square(stim - stim_hat))
-		self.weight_loss = tf.reduce_mean(tf.abs(self.var_dict['W0'])) + tf.reduce_mean(tf.abs(self.var_dict['W1']))
-		x_mask = np.ones((par['n_latent'], par['n_latent']),dtype = np.float32) - np.eye((par['n_latent']),dtype = np.float32)
-		self.sparsity_loss = tf.reduce_mean(x_mask*(tf.transpose(y) @ y))
-
-		self.loss = self.reconstruction_loss + par['sparsity_cost']*self.sparsity_loss \
-			+ par['weight_cost']*self.weight_loss
-
-		encoding_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'encoding')
-		adam_optimizer = tf.train.AdamOptimizer(learning_rate = par['learning_rate'])
-		self.train_encoder = adam_optimizer.minimize(self.loss, var_lis = encoding_vars)
-
-
-		"""
-		2. Pass the encoded stimulus into the Hopfield network, retrieve predicted action/values
-		"""
-		x_mapped = x @ self.W_stim_read
-		x_read = self.hopefield.read_fast_weights(x_mapped)
-		x_read = tf.reshape(x_read, [par['batch_size'], par['num_reward_types']*par['n_pol'], \
-			par['num_time_steps']//par['temporal_div']])
-		x_read = tf.reduce_sum(x_read, axis = 2)
-
-		# main output
-		self.x_concat = tf.concat([x_read, x], axis = 1)
-
-
 def main(gpu_id=None):
 
 	if gpu_id is not None:
@@ -211,23 +187,45 @@ def main(gpu_id=None):
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
 		if gpu_id == '0' else tf.GPUOptions()
 
+	tf.reset_default_graph()
+	stim     = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
+	action   = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
+	reward 	 = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
+	prev_val = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
+
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
 
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			rl = RL()
-			encoder = Encoder()
-			hopfield = Hopfield()
+			model = Model()
+
 
 		sess.run(tf.global_variables_initializer())
 
 		for i in range(par['n_batches']):
 
-			rooms # initialize rooms
+			stimulus = rooms # initialize rooms
+			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
+			total_reward = np.zeros((par['batch_size'], 1), dtype = np.float32)
 
 			for t in range(par['n_time_steps']):
 
-				x = sess.run([self.predictions], feed_dict = {self.stim_pl: s})
+				# Train encoder weights, output the policy and value functions
+				_, pol, val = sess.run([model.train_encoder, model.pol_out, model.val_out], \
+					feed_dict = {stim: stimulus})
+
+				# Choose action, calculate reward and determine next state
+				action_index	= np.random.multinomial(pol, 1)
+				action 			= np.one_hot(tf.squeeze(action_index), par['n_pol'])
+
+				stimulus, reward = rooms
+				total_reward += reward
+				prev_val = val
+
+				# append to buffer
+
+			sess.run(rl.train_RL, feed_dict = {rl.x0: latent, rl.action: action, \
+				rl.reward: reward, rl.prev_val: prev_val})
 
 
 
