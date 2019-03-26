@@ -7,8 +7,6 @@ import copy
 #   Move up, down, left, right
 #   Pick up reward
 
-print('Using \'Room Stim\' stimulus file.')
-
 class RoomStimulus:
 
 	def __init__(self):
