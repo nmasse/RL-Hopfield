@@ -149,14 +149,15 @@ if __name__ == '__main__':
 	r = Stimulus()
 	changes = np.random.choice([0,1],size=[par['batch_size']])
 	changes[0] = 1
-	changes[0] = 0
+	changes[1] = 0
 
 	import matplotlib.pyplot as plt
 	for i in range(10):
 
-		r.reset_rooms(changes)
-		if i == 5:
-			r.reset_rooms()
+		if i < 5:
+			r.reset_agents(changes)
+		else:
+			r.reset_rewards(changes)
 
 		stim_in = r.make_inputs()
 		print(stim_in[:2,:])
