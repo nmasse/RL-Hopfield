@@ -98,7 +98,7 @@ class Model:
 		#x1 = tf.layers.dropout(x1, rate = par['drop_rate'], training = True)
 		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b1'])
 
-		self.pol_out = x2 @ self.var_dict['W_pol'] + self.var_dict['b_pol']
+		self.pol_out = tf.nn.softmax(x2 @ self.var_dict['W_pol'] + self.var_dict['b_pol'])
 		self.val_out = x2 @ self.var_dict['W_val'] + self.var_dict['b_val']
 
 
@@ -131,11 +131,10 @@ class Model:
 		advantage = self.prev_val_pl - self.reward_pl - par['discount_rate']*self.val_out*terminal_state
 		self.val_loss = 0.5*tf.reduce_mean(tf.square(advantage))
 
-		pol_out_softmax   = tf.nn.softmax(self.pol_out, axis = -1)
 		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage*self.action_pl) \
-			*tf.log(1e-6 + pol_out_softmax))
-		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(pol_out_softmax \
-			*tf.log(1e-6 + pol_out_softmax), axis = -1))
+			*tf.log(1e-6 + self.pol_out))
+		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol_out \
+			*tf.log(1e-6 + self.pol_out), axis = -1))
 
 		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
 			- par['entropy_cost']*self.entropy_loss
@@ -195,50 +194,69 @@ class Model:
 
 def main(gpu_id = None):
 
+	# Select GPU
 	if gpu_id is not None:
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
-	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
-		if gpu_id == '0' else tf.GPUOptions()
+	# Reduce memory consumption for GPU 0
+	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1) \
+		# if gpu_id == '0' else tf.GPUOptions()
 
+	# Initialize stimulus environment
+	environment = stimulus.Stimulus()
+
+	# Reset graph and designate placeholders
 	tf.reset_default_graph()
 	stim     = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
 	action   = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
 	reward 	 = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
 	prev_val = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
 
+	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
 
+		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
 			model = Model(stim, reward, action, prev_val)
-
 		sess.run(tf.global_variables_initializer())
 
+		# Start training loop
 		for i in range(par['num_batches']):
 
-			stimulus = rooms # initialize rooms
-			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
-			total_reward = np.zeros((par['batch_size'], 1), dtype = np.float32)
+			# Reset environment at the start of each iteration
+			environment.reset_rooms()
 
+			# Pre-allocate prev_val and total_reward
+			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
+			total_reward = np.zeros(par['batch_size'], dtype = np.float32)
+
+			# Iterate through time
 			for t in range(par['num_time_steps']):
+
+				# Make inputs
+				stim_in = environment.make_inputs()
 
 				# Train encoder weights, output the policy and value functions
 				_, pol, val = sess.run([model.train_encoder, model.pol_out, model.val_out], \
-					feed_dict = {stim: stimulus})
+					feed_dict = {stim: stim_in})
 
 				# Choose action, calculate reward and determine next state
-				action_index	= np.random.multinomial(pol, 1)
-				action 			= np.one_hot(tf.squeeze(action_index), par['n_pol'])
-				reward 			= 0. # CALCULATE REWARD
+				action = np.array([np.random.multinomial(1, pol[t,:]) for t in range(par['batch_size'])])
+				reward = environment.agent_action(action)
 
-				stimulus, reward = rooms
+				# Update total reward and prev_val
 				total_reward += reward
 				prev_val = val
 
+				# Update the Hopfield network
 				sess.run([model.update_hopfield, model.train_RL], \
-					feed_dict = {stim: stimulus, action: action, reward: reward, prev_val: prev_val})
+					feed_dict = {stim: stim_in, action: action, reward: reward, prev_val: prev_val})
 
+				# Reset environment trials that have obtained a reward
+				environment.reset_rooms(reward != 0.)
+
+			# Update model weights
 			sess.run(model.update_weights)
 
 
