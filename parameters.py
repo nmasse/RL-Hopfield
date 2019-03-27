@@ -14,10 +14,7 @@ print('\n--> Loading parameters...')
 par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
-	'save_fn'				: '14_tasks_ver10_v1',
-	'train'					: True,
-	'save_weights'			: True,
-	'learning_method'		: 'RL', # 'RL' or 'SL'
+	'save_fn'				: 'maze_v1',
 	'LSTM_init'				: 0.02,
 	'w_init'				: 0.02,
 
@@ -31,10 +28,8 @@ par = {
 	'n_latent'				: 40,
 	'n_hopf_stim'			: 40*12,
 	'n_hopf_act'			: 9*4*12,
-	'top_down'				: True,
 
-
-	# read/write configuration
+	# Read/write configuration
 	'A_alpha_init'			: 0.99995,
 	'A_beta_init'			: 1.5,
 	'inner_steps'			: 1,
@@ -44,24 +39,11 @@ par = {
 	'learning_rate'			: 3e-4,
 	'drop_rate'				: 0.5,
 
-	# Variance values
-	'input_mean'			: 0.0,
-	'noise_in'				: 0.1,
-	'noise_rnn'				: 0.05,
-	'n_filters'				: 1,
-
 	# Task specs
-	'task'					: 'multistim',
 	'trial_length'			: 1200,
-	'mask_duration'			: 0,
 	'dead_time'				: 100,
 	'dt'					: 100,
-	'trials_per_seq'		: 100,
-	'task_list'				: [a for a in range(1,15)], #[a for a in range(49)],
-	'dead_trials'			: 90,
 	'temporal_div'			: 1,
-
-	# Maze task specs
 	'rewards'				: [1.],
 	'num_actions'			: 5,		# The number of different actions available to the agent
 	'room_width'			: 6,

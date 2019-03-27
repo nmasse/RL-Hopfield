@@ -13,8 +13,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 # Model modules
-from parameters_v10 import *
-import stimulus_sequence
+from parameters import *
+import stimulus
 import time
 
 # Match GPU IDs to nvidia-smi command
@@ -126,7 +126,7 @@ class Model:
 
 		pol_out_softmax   = tf.nn.softmax(self.pol_out, axis = -1)
 		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage)*action \
-			*tf.log(1e-6 + pol_out_softmax)
+			*tf.log(1e-6 + pol_out_softmax))
 		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(pol_out_softmax \
 			*tf.log(1e-6 + pol_out_softmax), axis = -1))
 
@@ -239,10 +239,10 @@ def print_important_params():
 
 	notes = ''
 
-	keys = ['learning_method', 'n_hidden', 'n_latent', 'noise_in','noise_rnn','top_down',\
+	keys = ['learning_method', 'n_hidden', 'n_latent',\
 		'A_alpha_init', 'A_beta_init', 'inner_steps', 'batch_norm_inner', 'learning_rate', \
 		'task_list', 'trials_per_seq', 'fix_break_penalty', 'wrong_choice_penalty', \
-		'correct_choice_reward', 'discount_rate', 'num_motion_dirs', 'sparsity_cost', 'n_filters', \
+		'correct_choice_reward', 'discount_rate', 'num_motion_dirs', 'sparsity_cost', \
 		'rec_cost', 'weight_cost', 'entropy_cost', 'val_cost', 'drop_rate', 'batch_size', \
 		'n_batches', 'share_hippocampus', 'save_fn','temporal_div']
 
