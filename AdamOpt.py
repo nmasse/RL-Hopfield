@@ -92,7 +92,9 @@ class AdamOpt:
 
         update_weights_op = []
         for (grads, _), var in zip(self.gradients, self.variables):
-            update_var_op.append(tf.assign_add(var, self.delta_grads[var.op.name]))
+            update_weights_op.append(tf.assign_add(var, self.delta_grads[var.op.name]))
+        with tf.control_dependencies(update_weights_op):
+            update_weights_op.append(self.reset_delta_grads())
 
         return tf.group(*update_weights_op)
 

@@ -69,23 +69,23 @@ class Model:
 		self.H_stim_mask = tf.constant(par['H_stim_mask'])
 
 
-	def stimulus_encoding():
+	def stimulus_encoding(self):
 
 		"""
 		Encode the stimulus into a sparse representation
 		"""
 		self.latent = tf.nn.relu(self.stim_pl @ self.var_dict['W_enc'] + self.var_dict['b_enc'])
-		self.stim_hat = x @ self.var_dec['W_enc']
+		self.stim_hat = self.latent @ self.var_dict['W_dec']
 
 		"""
 		Project the encoded stimulus into the Hopfield network, retrieve predicted action/values
 		"""
-		x_mapped = x @ self.W_stim_read
+		x_mapped = self.latent @ self.W_stim_read
 		x_read = self.read_hopfield(x_mapped)
-		x_read = tf.reshape(x_read, [par['batch_size'], par['num_reward_types']*par['n_pol'], \
-			par['num_time_steps']//par['temporal_div']])
+		x_read = tf.reshape(x_read, [par['batch_size'], (len(par['rewards']) + 1)*par['n_pol'], \
+			par['hopf_multiplier']])
 		x_read = tf.reduce_sum(x_read, axis = 2)
-		self.encoding_out = tf.concat([x_read, x], axis = 1) # main output
+		self.encoding_out = tf.concat([x_read, self.latent], axis = 1) # main output
 
 
 	def policy(self):
@@ -96,7 +96,7 @@ class Model:
 		"""
 		x1 = tf.nn.relu(self.encoding_out @ self.var_dict['W0'] + self.var_dict['b0'])
 		#x1 = tf.layers.dropout(x1, rate = par['drop_rate'], training = True)
-		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b2'])
+		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b1'])
 
 		self.pol_out = x2 @ self.var_dict['W_pol'] + self.var_dict['b_pol']
 		self.val_out = x2 @ self.var_dict['W_val'] + self.var_dict['b_val']
@@ -108,7 +108,7 @@ class Model:
 		Calculate the gradient on the latent weights
 		"""
 		encoding_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'encoding')
-		self.encoding_optimizer = AdamOpt(encoding_vars, par['learning_rate'])
+		self.encoding_optimizer = AdamOpt.AdamOpt(encoding_vars, par['learning_rate'])
 
 		self.reconstruction_loss = tf.reduce_mean(tf.square(self.stim_pl - self.stim_hat))
 		self.weight_loss = tf.reduce_mean(tf.abs(self.var_dict['W_enc'])) + tf.reduce_mean(tf.abs(self.var_dict['W_dec']))
@@ -116,7 +116,7 @@ class Model:
 		self.sparsity_loss = tf.reduce_mean(latent_mask*(tf.transpose(self.latent) @ self.latent))
 		self.loss = self.reconstruction_loss + par['sparsity_cost']*self.sparsity_loss \
 			+ par['weight_cost']*self.weight_loss
-		self.train_encoder = self.encoding_optimizer.compute_gradients.minimize(self.loss)
+		self.train_encoder = self.encoding_optimizer.compute_gradients(self.loss)
 
 
 	def calculate_policy_grads(self):
@@ -125,7 +125,7 @@ class Model:
 		Calculate the gradient on the policy/value weights
 		"""
 		RL_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='RL')
-		self.RL_optimizer = AdamOpt(RL_vars, par['learning_rate'])
+		self.RL_optimizer = AdamOpt.AdamOpt(RL_vars, par['learning_rate'])
 
 		terminal_state = tf.cast(tf.logical_not(tf.equal(self.reward_pl, tf.constant(0.))), tf.float32)
 		advantage = self.prev_val_pl - self.reward_pl - par['discount_rate']*self.val_out*terminal_state
@@ -138,7 +138,7 @@ class Model:
 			*tf.log(1e-6 + pol_out_softmax), axis = -1))
 
 		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
-			- par['entropy_cost']*self.ent_loss
+			- par['entropy_cost']*self.entropy_loss
 		self.train_RL = self.RL_optimizer.compute_gradients(self.loss)
 
 	def update_weights(self):
@@ -146,18 +146,19 @@ class Model:
 		"""
 		Apply the weight changes
 		"""
-		self.update_weights = tf.group(*[self.encoding_optimizer.update_weights, \
-			self.RL_optimizer.update_weights])
+		self.update_weights = tf.group(*[self.encoding_optimizer.update_weights(), \
+			self.RL_optimizer.update_weights()])
+		##### RESET GRADS
 
 
-	def read_hopfield(self):
+	def read_hopfield(self, x):
 
-		h_hat = tf.zeros_like(self.latent)
+		h_hat = tf.zeros_like(x)
 		alpha = 0.5
 		cycles = 6
 		for n in range(cycles):
 
-			h_hat = alpha*h_hat + (1-alpha)*tf.einsum('ij, ijk->ik', self.latent, self.H_stim) + self.latent
+			h_hat = alpha*h_hat + (1-alpha)*tf.einsum('ij, ijk->ik', x, self.H_stim) + x
 			h_hat = tf.nn.relu(h_hat)
 			h_hat = tf.minimum(100., h_hat)
 
@@ -210,26 +211,26 @@ def main(gpu_id = None):
 
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model()
+			model = Model(stim, reward, action, prev_val)
 
 		sess.run(tf.global_variables_initializer())
 
-		for i in range(par['n_batches']):
+		for i in range(par['num_batches']):
 
 			stimulus = rooms # initialize rooms
 			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
 			total_reward = np.zeros((par['batch_size'], 1), dtype = np.float32)
 
-			for t in range(par['n_time_steps']):
+			for t in range(par['num_time_steps']):
 
 				# Train encoder weights, output the policy and value functions
 				_, pol, val = sess.run([model.train_encoder, model.pol_out, model.val_out], \
 					feed_dict = {stim: stimulus})
 
 				# Choose action, calculate reward and determine next state
-				reward 			= 0. # CALCULATE REWARD
 				action_index	= np.random.multinomial(pol, 1)
 				action 			= np.one_hot(tf.squeeze(action_index), par['n_pol'])
+				reward 			= 0. # CALCULATE REWARD
 
 				stimulus, reward = rooms
 				total_reward += reward
