@@ -207,8 +207,8 @@ def main(gpu_id = None):
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
 	# Reduce memory consumption for GPU 0
-	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1) \
-		# if gpu_id == '0' else tf.GPUOptions()
+	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
+		if gpu_id == '0' else tf.GPUOptions()
 
 	# Initialize stimulus environment
 	environment = stimulus.Stimulus()
