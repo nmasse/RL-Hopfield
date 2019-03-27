@@ -234,7 +234,8 @@ def main(gpu_id = None):
 		for i in range(par['num_batches']):
 
 			# Reset environment at the start of each iteration
-			environment.reset_rooms()
+			environment.reset_agents()
+			environment.reset_rewards()
 
 			# Pre-allocate prev_val and total_reward
 			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
@@ -263,8 +264,8 @@ def main(gpu_id = None):
 					feed_dict = {stim_pl: stim_in, action_pl: action, reward_pl: reward, \
 					prev_val_pl: prev_val, time_step_pl:t})
 
-				# Reset environment trials that have obtained a reward
-				environment.reset_rooms(reward != 0.)
+				# Reset agents that have obtained a reward
+				environment.reset_agents(reward != 0.)
 
 			# Update model weights
 			sess.run(model.update_weights)

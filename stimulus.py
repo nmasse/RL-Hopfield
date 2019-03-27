@@ -19,17 +19,27 @@ class Stimulus:
 		self.rewards = par['rewards']
 
 
-	def reset_rooms(self, trial_completion_vector=None):
+	def reset_rewards(self, trial_completion_vector=None):
 
 		if trial_completion_vector is not None:
 			trial_completion_vector = trial_completion_vector.astype(np.bool)
 			for t in range(par['batch_size']):
 				if trial_completion_vector[t]:
 					self.place_rewards(agent_id=t)
-					self.place_agents(agent_id=t)
 		else:
 			self.place_rewards()
+
+
+	def reset_agents(self, trial_completion_vector=None):
+
+		if trial_completion_vector is not None:
+			trial_completion_vector = trial_completion_vector.astype(np.bool)
+			for t in range(par['batch_size']):
+				if trial_completion_vector[t]:
+					self.place_agents(agent_id=t)
+		else:
 			self.place_agents()
+
 
 	def make_reward_locations(self):
 
@@ -92,7 +102,7 @@ class Stimulus:
 		return np.float32(inputs)
 
 
-	def agent_action(self, action, mask=np.zeros(par['batch_size'])):
+	def agent_action(self, action, mask=np.ones(par['batch_size'])):
 		""" Takes in a vector of actions of size [batch_size, n_pol] """
 
 		action = np.argmax(action, axis=-1) # to [batch_size]
