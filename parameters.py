@@ -24,6 +24,7 @@ par = {
 	'num_rule_tuned'		: 0,
 	'num_rew_tuned'			: 10,		# For reward vector in maze task
 	'n_hidden'				: [100, 100],
+	'n_pol'					: 5,
 	'n_val'					: 1,
 	'n_latent'				: 40,
 	'hopf_multiplier'		: 10,
@@ -37,6 +38,7 @@ par = {
 	# Timings and rates
 	'learning_rate'			: 3e-4,
 	'drop_rate'				: 0.5,
+	'discount_rate'			: 0.95,
 
 	# Task specs
 	'num_time_steps'		: 1000,
@@ -127,7 +129,7 @@ def update_dependencies():
 	par['W_dec_init'] = np.random.uniform(-c, c, size=[par['n_latent'], par['n_input']]).astype(np.float32)
 	par['b_enc_init'] = np.zeros([1, par['n_latent']], dtype=np.float32)
 
-	N = 2*par['n_pol'] + par['n_latent']
+	N = (len(par['rewards']) + 1)*par['n_pol'] + par['n_latent']
 	par['W0_init'] = np.random.uniform(-c, c, size=[N, par['n_hidden'][0]]).astype(np.float32)
 	par['W1_init'] = np.random.uniform(-c, c, size=[par['n_hidden'][0], par['n_hidden'][1]]).astype(np.float32)
 	par['b0_init'] = np.zeros([1, par['n_hidden'][0]], dtype=np.float32)
@@ -143,7 +145,7 @@ def update_dependencies():
 		k = np.random.randint(par['hopf_multiplier'])
 		par['W_stim_write'][i, j, k + j*par['hopf_multiplier']] = 1.
 
-	N = par['num_reward_types']*par['n_pol']
+	N = 2*par['n_pol']
 	par['W_act_write'] = np.zeros([par['hopf_multiplier'], N, par['n_hopf_act']], dtype=np.float32)
 	for i,j in product(range(par['hopf_multiplier']), range(N)):
 		k = np.random.randint(par['hopf_multiplier'])
