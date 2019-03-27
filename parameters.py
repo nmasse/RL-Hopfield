@@ -26,7 +26,7 @@ par = {
 	'n_hidden'				: [100, 100],
 	'n_pol'					: 5,
 	'n_val'					: 1,
-	'n_latent'				: 40,
+	'n_latent'				: 50,
 	'hopf_multiplier'		: 10,
 
 	# Hopfield configuration
@@ -37,27 +37,27 @@ par = {
 	'covariance_method'		: False,
 
 	# Timings and rates
-	'learning_rate'			: 3e-4,
+	'learning_rate'			: 1e-4,
 	'drop_rate'				: 0.5,
-	'discount_rate'			: 0.95,
+	'discount_rate'			: 0.8,
 
 	# Task specs
-	'num_time_steps'		: 1000,
+	'num_time_steps'		: 100,
 	'num_batches'			: 1000,
 
 	# Maze task specs
 	'rewards'				: [1.],
 	'num_actions'			: 5,		# The number of different actions available to the agent
-	'room_width'			: 6,
+	'room_width'			: 4,
 	'room_height'			: 4,
 	'use_default_rew_locs'	: False,
 
 
 	# Cost values
-	'sparsity_cost'         : 1e-3, # was 1e-2
+	'sparsity_cost'         : 1e-1, # was 1e-2
 	'rec_cost'				: 1e-3,  # was 1e-2
 	'weight_cost'           : 1e-2,  # was 1e-6
-	'entropy_cost'          : 0.01,
+	'entropy_cost'          : 0.05,
 	'val_cost'              : 0.01,
 
 	# Training specs

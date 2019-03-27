@@ -117,7 +117,7 @@ class Model:
 		self.reconstruction_loss = tf.reduce_mean(tf.square(self.stim_pl - self.stim_hat))
 		self.weight_loss = tf.reduce_mean(tf.abs(self.var_dict['W_enc'])) + tf.reduce_mean(tf.abs(self.var_dict['W_dec']))
 		latent_mask = np.ones((par['n_latent'], par['n_latent']),dtype = np.float32) - np.eye((par['n_latent']),dtype = np.float32)
-		self.sparsity_loss = tf.reduce_mean(latent_mask*(tf.transpose(self.latent) @ self.latent))
+		self.sparsity_loss = tf.reduce_mean(latent_mask*(tf.transpose(self.latent) @ self.latent))/par['batch_size']
 		self.loss = self.reconstruction_loss + par['sparsity_cost']*self.sparsity_loss \
 			+ par['weight_cost']*self.weight_loss
 		self.train_encoder = self.encoding_optimizer.compute_gradients(self.loss)
@@ -132,7 +132,7 @@ class Model:
 		self.RL_optimizer = AdamOpt.AdamOpt(RL_vars, par['learning_rate'])
 
 		terminal_state = tf.cast(tf.logical_not(tf.equal(self.reward_pl, tf.constant(0.))), tf.float32)
-		advantage = self.prev_val_pl - self.reward_pl - par['discount_rate']*self.val_out*terminal_state
+		advantage = self.reward_pl + par['discount_rate']*self.val_out*(1-terminal_state) - self.prev_val_pl
 		self.val_loss = 0.5*tf.reduce_mean(tf.square(advantage))
 
 		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage*self.action_pl) \
@@ -248,21 +248,26 @@ def main(gpu_id = None):
 				stim_in = environment.make_inputs()
 
 				# Train encoder weights, output the policy and value functions
-				_, pol, val = sess.run([model.train_encoder, model.pol_out, model.val_out], \
-					feed_dict = {stim_pl: stim_in})
+				_, pol, val, rec_loss, sparsity_loss = sess.run([model.train_encoder, model.pol_out, model.val_out, \
+					model.reconstruction_loss, model.sparsity_loss], feed_dict = {stim_pl: stim_in})
+
+				W = sess.run(model.var_dict)
+				#print(type(W))
+				#print('var W_enc ', np.std(W['W_enc']))
 
 				# Choose action, calculate reward and determine next state
-				action = np.array([np.random.multinomial(1, pol[t,:]) for t in range(par['batch_size'])])
+				#print('pol', pol.shape, type(pol))
+				action = np.array([np.random.multinomial(1, pol[t,:]-1e-6) for t in range(par['batch_size'])])
 				reward = environment.agent_action(action)
 
 				# Update total reward and prev_val
 				total_reward += reward
 				prev_val = val
-
-				# Update the Hopfield network
-				sess.run([model.update_hopfield, model.train_RL], \
-					feed_dict = {stim_pl: stim_in, action_pl: action, reward_pl: reward, \
-					prev_val_pl: prev_val, time_step_pl:t})
+				if i > 100:
+					# Update the Hopfield network
+					sess.run([model.update_hopfield, model.train_RL], \
+						feed_dict = {stim_pl: stim_in, action_pl: action, reward_pl: reward, \
+						prev_val_pl: prev_val, time_step_pl:t})
 
 				# Reset agents that have obtained a reward
 				environment.reset_agents(reward != 0.)
@@ -270,7 +275,7 @@ def main(gpu_id = None):
 			# Update model weights
 			sess.run(model.update_weights)
 
-			print('Iter ', i, ' reward ', np.mean(total_reward))
+			print('Iter ', i, ' reward ', np.mean(total_reward), ' rec_loss',rec_loss, ' sparsity_loss', sparsity_loss)
 
 
 
