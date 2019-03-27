@@ -1,10 +1,11 @@
+# Own files
+sftp-config.json
+dqn.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
-# SFTP interface
-sftp-config.json
 
 # C extensions
 *.so

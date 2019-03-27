@@ -208,6 +208,9 @@ class Model:
 
 def main(gpu_id = None):
 
+	# Print out context
+	print_important_params()
+
 	# Select GPU
 	if gpu_id is not None:
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
@@ -251,6 +254,8 @@ def main(gpu_id = None):
 			prev_t = 0
 			total_reward = np.zeros((par['batch_size'],1), dtype = np.float32)
 
+			action_record = []
+
 			# Iterate through time
 			for t in range(par['num_time_steps']):
 
@@ -262,13 +267,11 @@ def main(gpu_id = None):
 					model.reconstruction_loss, model.sparsity_loss, model.x_read], feed_dict = {stim_pl: stim_in})
 
 				W = sess.run(model.var_dict)
-				#print(type(W))
-				#print('var W_enc ', np.std(W['W_enc']))
 
 				# Choose action, calculate reward and determine next state
-				#print('pol', pol.shape, type(pol))
 				action = np.array([np.random.multinomial(1, pol[t,:]-1e-6) for t in range(par['batch_size'])])
 				reward = environment.agent_action(action)
+				action_record.append(action)
 
 				# Update total reward and prev_val
 				total_reward += reward
@@ -292,16 +295,22 @@ def main(gpu_id = None):
 			sess.run(model.update_weights)
 			sess.run(model.reset_hopfield)
 
-			print('Iter ', i, ' reward ', np.mean(total_reward), ' rec_loss',rec_loss, ' sparsity_loss', sparsity_loss)
-			print('x_read ', np.mean(x_read))
+			# Analyze actions
+			action_record = np.concatenate(action_record, axis=0)
+			action_record = np.round(np.mean(action_record, axis=0), 2).tolist()
 
+			# Output network performance
+			print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:8.6f} | Sparsity Loss: {:8.6f} | Action Dist: {}'.format(\
+				i, np.mean(total_reward), rec_loss, sparsity_loss, action_record))
+			# print('x_read ', np.mean(x_read))
 
 def print_important_params():
 
-	keys = ['learning_method', 'n_hidden', 'n_latent','learning_rate', \
-		'discount_rate', 'sparsity_cost','rec_cost', 'weight_cost', 'entropy_cost',
-		'val_cost', 'drop_rate', 'batch_size', \
-		'n_batches', 'save_fn','hopf_multiplier']
+	keys = ['save_fn', 'learning_rate', 'n_hidden', 'n_latent', 'hopf_multiplier', \
+		'hopf_alpha', 'hopf_neuron_alpha', 'hopf_beta', 'hopf_cycles', 'covariance_method', \
+		'drop_rate', 'discount_rate', 'num_time_steps', 'num_batches', 'batch_size', 'rewards', \
+		'room_width', 'room_height', 'sparsity_cost', 'rec_cost', 'weight_cost', 'entropy_cost', \
+		'val_cost']
 
 	print('-'*60)
 	[print('{:<24} : {}'.format(k, par[k])) for k in keys]

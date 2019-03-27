@@ -47,11 +47,10 @@ par = {
 
 	# Maze task specs
 	'rewards'				: [1.],
-	'num_actions'			: 5,		# The number of different actions available to the agent
+	'num_actions'			: 4,		# The number of different actions available to the agent
 	'room_width'			: 4,
 	'room_height'			: 4,
 	'use_default_rew_locs'	: False,
-
 
 	# Cost values
 	'sparsity_cost'         : 1e-1, # was 1e-2
