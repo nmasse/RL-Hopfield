@@ -27,17 +27,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 class Model:
 
-	def __init__(self, stim, reward, action, prev_val):
+	def __init__(self, stim, reward, action, prev_val, time_step):
 
 		# Placeholders
 		self.stim_pl		= stim
 		self.reward_pl		= reward
 		self.action_pl		= action
 		self.prev_val_pl	= prev_val
+		self.time_step_pl	= time_step
 
 		self.declare_variables()
 		self.stimulus_encoding()
 		self.policy()
+		self.write_hopfield()
 		self.calculate_encoder_grads()
 		self.calculate_policy_grads()
 		self.update_weights()
@@ -62,6 +64,8 @@ class Model:
 				par['n_hopf_act']], initializer=tf.zeros_initializer(), trainable = False)
 			self.H_act_r = tf.get_variable('H_act_r', shape = [par['batch_size'], par['n_hopf_act'], \
 				par['n_hopf_stim']], initializer=tf.zeros_initializer(), trainable = False)
+			self.H_neuron = tf.get_variable('H_act_n', shape = [par['batch_size'], par['n_hopf_stim']], \
+				initializer=tf.zeros_initializer(), trainable = False)
 
 		self.W_stim_write = tf.constant(par['W_stim_write'])
 		self.W_act_write = tf.constant(par['W_act_write'])
@@ -168,26 +172,30 @@ class Model:
 
 	def write_hopfield(self):
 
+		h = self.latent @ self.W_stim_write[self.time_step_pl % par['hopf_multiplier'], :, :]
 		action_reward = tf.concat([self.action_pl*self.reward_pl, \
 			self.action_pl*(1 - self.reward_pl)], axis = -1)
-		hh = tf.einsum('ij,ik->ijk', self.latent, self.latent)
-		h_old_new = tf.einsum('ij,ik->ijk', h_old, self.latent)
+		action_reward = action_reward @ self.W_act_write[self.time_step_pl % par['hopf_multiplier'], :, :]
+		hh = tf.einsum('ij,ik->ijk', h, h)
+		h_old_new = tf.einsum('ij,ik->ijk', self.H_neuron, h)
 		#h_old_new *= par['H_old_new_mask']
 
 		if par['covariance_method']:
 			H_stim += (h_old_new + hh)/par['n_hopf_stim']
 		else:
-			h1 = tf.einsum('ij, jk->ijk', self.latent, self.H_stim_mask)
+			h1 = tf.einsum('ij, jk->ijk', h, self.H_stim_mask)
 			c = tf.einsum('ijk,ikm->ijm', h1, self.H_stim)
 			H_stim_grad = (h_old_new + hh - c - tf.transpose(c,[0,2,1]))/par['n_hopf_stim']
 			H_stim_grad = tf.einsum('ijk,jk->ijk', H_stim_grad, self.H_stim_mask)
 
-		H_act_grad = tf.einsum('ij, ik->ijk', self.latent, action_reward)
+		H_act_grad = tf.einsum('ij, ik->ijk', h, action_reward)
 		# DO I INCLUDE THIS NEXT PART?
 		#H_act += tf.einsum('ij, ik->ijk', a_old, h)
 
 		update_H_stim = tf.assign_add(self.H_stim, H_stim_grad)
 		update_H_act = tf.assign_add(self.H_act, H_act_grad)
+		update_H_neuron = tf.assign_add(self.H_neuron, par['hopf_neuron_alpha']*self.H_neuron + \
+			(1-par['hopf_neuron_alpha'])*h)
 
 		self.update_hopfield = tf.group(*[update_H_stim, update_H_act])
 
@@ -207,10 +215,11 @@ def main(gpu_id = None):
 
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
-	stim     = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
-	action   = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
-	reward 	 = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
-	prev_val = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
+	stim      = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
+	action    = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
+	reward 	  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
+	prev_val  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
+	time_step = tf.placeholder(tf.int32, [], 'time_step')
 
 	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
@@ -218,7 +227,7 @@ def main(gpu_id = None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(stim, reward, action, prev_val)
+			model = Model(stim, reward, action, prev_val, time_step)
 		sess.run(tf.global_variables_initializer())
 
 		# Start training loop
@@ -251,7 +260,8 @@ def main(gpu_id = None):
 
 				# Update the Hopfield network
 				sess.run([model.update_hopfield, model.train_RL], \
-					feed_dict = {stim: stim_in, action: action, reward: reward, prev_val: prev_val})
+					feed_dict = {stim: stim_in, action: action, reward: reward, \
+					prev_val: prev_val, time_step:t})
 
 				# Reset environment trials that have obtained a reward
 				environment.reset_rooms(reward != 0.)
