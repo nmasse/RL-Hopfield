@@ -167,7 +167,7 @@ class Model:
 
 		pred_action = tf.einsum('ij, ijk->ik', h_hat, self.H_act_f)
 
-		return pred_action
+		return pred_action/tf.reduce_sum(pred_action, axis = 1, keepdims = True)
 
 
 	def write_hopfield(self):
