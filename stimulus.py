@@ -122,7 +122,7 @@ class Stimulus:
 				if rew is not None:
 					reward[i] = rew
 
-		return reward
+		return reward[:, np.newaxis]
 
 
 	def get_agent_locs(self):
@@ -163,4 +163,3 @@ if __name__ == '__main__':
 			ax[t].imshow(demo_room)
 			ax[t].set_title('Iteration: {} | Room: {}'.format(i, t))
 		plt.show()
-	

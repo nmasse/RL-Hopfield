@@ -31,6 +31,7 @@ par = {
 
 	# Hopfield configuration
 	'hopf_alpha'			: 0.999,
+	'hopf_neuron_alpha'		: 0.9,
 	'hopf_beta'				: 1.,
 	'hopf_cycles'			: 6,
 	'covariance_method'		: False,

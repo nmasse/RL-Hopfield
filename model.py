@@ -193,8 +193,8 @@ class Model:
 		#H_act += tf.einsum('ij, ik->ijk', a_old, h)
 
 		update_H_stim = tf.assign_add(self.H_stim, H_stim_grad)
-		update_H_act = tf.assign_add(self.H_act, H_act_grad)
-		update_H_neuron = tf.assign_add(self.H_neuron, par['hopf_neuron_alpha']*self.H_neuron + \
+		update_H_act = tf.assign_add(self.H_act_f, H_act_grad)
+		update_H_neuron = tf.assign(self.H_neuron, par['hopf_neuron_alpha']*self.H_neuron + \
 			(1-par['hopf_neuron_alpha'])*h)
 
 		self.update_hopfield = tf.group(*[update_H_stim, update_H_act])
@@ -215,11 +215,11 @@ def main(gpu_id = None):
 
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
-	stim      = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
-	action    = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
-	reward 	  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
-	prev_val  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
-	time_step = tf.placeholder(tf.int32, [], 'time_step')
+	stim_pl      = tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
+	action_pl    = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
+	reward_pl 	 = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
+	prev_val_pl  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'prev_val')
+	time_step_pl = tf.placeholder(tf.int32, [], 'time_step')
 
 	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
@@ -227,7 +227,7 @@ def main(gpu_id = None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(stim, reward, action, prev_val, time_step)
+			model = Model(stim_pl, reward_pl, action_pl, prev_val_pl, time_step_pl)
 		sess.run(tf.global_variables_initializer())
 
 		# Start training loop
@@ -238,7 +238,7 @@ def main(gpu_id = None):
 
 			# Pre-allocate prev_val and total_reward
 			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
-			total_reward = np.zeros(par['batch_size'], dtype = np.float32)
+			total_reward = np.zeros((par['batch_size'],1), dtype = np.float32)
 
 			# Iterate through time
 			for t in range(par['num_time_steps']):
@@ -248,7 +248,7 @@ def main(gpu_id = None):
 
 				# Train encoder weights, output the policy and value functions
 				_, pol, val = sess.run([model.train_encoder, model.pol_out, model.val_out], \
-					feed_dict = {stim: stim_in})
+					feed_dict = {stim_pl: stim_in})
 
 				# Choose action, calculate reward and determine next state
 				action = np.array([np.random.multinomial(1, pol[t,:]) for t in range(par['batch_size'])])
@@ -260,14 +260,16 @@ def main(gpu_id = None):
 
 				# Update the Hopfield network
 				sess.run([model.update_hopfield, model.train_RL], \
-					feed_dict = {stim: stim_in, action: action, reward: reward, \
-					prev_val: prev_val, time_step:t})
+					feed_dict = {stim_pl: stim_in, action_pl: action, reward_pl: reward, \
+					prev_val_pl: prev_val, time_step_pl:t})
 
 				# Reset environment trials that have obtained a reward
 				environment.reset_rooms(reward != 0.)
 
 			# Update model weights
 			sess.run(model.update_weights)
+
+			print('Iter ', i, ' reward ', np.mean(total_reward))
 
 
 
