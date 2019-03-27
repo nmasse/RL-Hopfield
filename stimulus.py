@@ -126,8 +126,15 @@ class Stimulus:
 			elif a == 3 and self.agent_loc[i][0] != 0:
 				# Input 3 = Move Left (visually up)
 				self.agent_loc[i][0] -= 1
-			elif a == 4:
+			elif par['num_actions'] >= 5 and a == 4:
 				# Input 5 = Pick Reward
+				rew, _ = self.identify_reward(self.agent_loc[i], i)
+				if rew is not None:
+					reward[i] = rew
+
+			# If there's no pick action, earn reward just
+			# by standing on the correct square
+			if par['num_actions'] < 5:
 				rew, _ = self.identify_reward(self.agent_loc[i], i)
 				if rew is not None:
 					reward[i] = rew
