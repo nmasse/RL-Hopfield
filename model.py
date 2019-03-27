@@ -3,6 +3,7 @@
 # Required packages
 import tensorflow as tf
 import numpy as np
+import AdamOpt
 import pickle
 import os, sys, time
 from itertools import product
@@ -37,8 +38,9 @@ class Model:
 		self.declare_variables()
 		self.stimulus_encoding()
 		self.policy()
-		self.update_encoder_weights()
-		self.update_policy_weights()
+		self.calculate_encoder_grads()
+		self.calculate_policy_grads()
+		self.update_weights()
 
 
 	def declare_variables(self):
@@ -65,6 +67,7 @@ class Model:
 		self.W_act_write = tf.constant(par['W_act_write'])
 		self.W_stim_read = tf.constant(par['W_stim_read'])
 		self.H_stim_mask = tf.constant(par['H_stim_mask'])
+
 
 	def stimulus_encoding():
 
@@ -96,13 +99,13 @@ class Model:
 		self.val_out = x2 @ self.var_dict['W_val'] + self.var_dict['b_val']
 
 
-	def update_encoder_weights(self):
+	def calculate_encoder_grads(self):
 
 		"""
 		Update encoding weights
 		"""
-		self.adam_optimizer = tf.train.AdamOptimizer(learning_rate = par['learning_rate'])
 		encoding_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'encoding')
+		self.encoding_optimizer = AdamOpt(encoding_vars, par['learning_rate'])
 
 		self.reconstruction_loss = tf.reduce_mean(tf.square(self.stim_pl - self.stim_hat))
 		self.weight_loss = tf.reduce_mean(tf.abs(self.var_dict['W_enc'])) + tf.reduce_mean(tf.abs(self.var_dict['W_dec']))
@@ -110,15 +113,16 @@ class Model:
 		self.sparsity_loss = tf.reduce_mean(latent_mask*(tf.transpose(self.latent) @ self.latent))
 		self.loss = self.reconstruction_loss + par['sparsity_cost']*self.sparsity_loss \
 			+ par['weight_cost']*self.weight_loss
-		self.train_encoder = self.adam_optimizer.minimize(self.loss, var_lis = encoding_vars)
+		self.train_encoder = self.encoding_optimizer.compute_gradients.minimize(self.loss)
 
 
-	def update_policy_weights(self):
+	def calculate_policy_grads(self):
 
 		"""
 		Perform gradient descent
 		"""
 		RL_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='RL')
+		self.RL_optimizer = AdamOpt(RL_vars, par['learning_rate'])
 
 		terminal_state = tf.cast(tf.logical_not(tf.equal(self.reward_pl, tf.constant(0.))), tf.float32)
 		advantage = self.prev_val_pl - self.reward_pl - par['discount_rate']*self.val_out*terminal_state
@@ -132,7 +136,12 @@ class Model:
 
 		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
 			- par['entropy_cost']*self.ent_loss
-		self.train_RL = adam_optimizer.minimize(self.loss, var_list = RL_vars)
+		self.train_RL = self.RL_optimizer.compute_gradients(self.loss)
+
+	def update_weights(self):
+
+		self.update_weights = tf.group(*[self.encoding_optimizer.update_weights, \
+			self.RL_optimizer.update_weights])
 
 
 	def read_hopfield(self):
@@ -226,12 +235,8 @@ def main(gpu_id = None):
 				total_reward += reward
 				prev_val = val
 
-				# append to buffer
-
-			sess.run(rl.train_RL, feed_dict = {rl.x0: latent, rl.action: action, \
-				rl.reward: reward, rl.prev_val: prev_val})
-
-
+				sess.run(rl.train_RL, feed_dict = {rl.x0: latent, rl.action: action, \
+					rl.reward: reward, rl.prev_val: prev_val})
 
 
 
