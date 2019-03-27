@@ -90,7 +90,7 @@ class Stimulus:
 
 
 	def agent_action(self, action, mask):
-		""" Takes in a vector of actions of size [batch_size, n_output] """
+		""" Takes in a vector of actions of size [batch_size, n_pol] """
 
 		action = np.argmax(action, axis=-1) # to [batch_size]
 		reward = np.zeros(par['batch_size'])
@@ -144,7 +144,7 @@ if __name__ == '__main__':
 		inp = r.make_inputs()
 		inpsum = np.sum(inp[:,4:], axis=1)
 
-		act = np.zeros([par['batch_size'], par['n_output']])
+		act = np.zeros([par['batch_size'], par['n_pol']])
 		act[:,4] = 1
 		rew = r.agent_action(act, np.ones(par['batch_size']))
 

@@ -39,8 +39,8 @@ par = {
 	'drop_rate'				: 0.5,
 
 	# Task specs
-	'n_time_steps'			: 1000,
-	'n_batches'				: 1000,
+	'num_time_steps'		: 1000,
+	'num_batches'			: 1000,
 
 	# Maze task specs
 	'rewards'				: [1.],
@@ -106,17 +106,14 @@ def update_weights(var_dict):
 def update_dependencies():
 	""" Updates all parameter dependencies """
 
+	# Set input and output sizes
+	par['n_input']  = par['num_nav_tuned'] + par['num_fix_tuned'] + par['num_rew_tuned'] + par['num_rule_tuned']
+	par['n_pol'] = par['num_actions']
+
+	par['num_reward_types'] = len(par['rewards']) + 1
 
 	par['n_hopf_stim'] = par['n_latent']*par['hopf_multiplier']
 	par['n_hopf_act'] = 2*par['n_pol']*par['hopf_multiplier']
-
-	# Set input and output sizes
-	par['n_input']  = par['num_nav_tuned'] + par['num_fix_tuned'] + par['num_rew_tuned'] + par['num_rule_tuned']
-	par['n_output'] = par['num_actions']
-	par['n_pol'] = par['num_motion_dirs'] + 1
-
-	# Set trial step length
-	par['num_time_steps'] = par['trial_length']//par['dt']
 
 	# Specify one-hot vectors matching with each reward for maze task
 	condition = True
