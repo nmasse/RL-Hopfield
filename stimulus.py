@@ -7,65 +7,69 @@ import copy
 #   Move up, down, left, right
 #   Pick up reward
 
-class RoomStimulus:
+
+class Stimulus:
+
 
 	def __init__(self):
 
-		self.initialize_rooms()
+		self.place_rewards()
 		self.place_agents()
 
 		self.rewards = par['rewards']
-		
 
-	def initialize_rooms(self):
 
-		# Two sets of reward locations:  Random and default
-		rand_locs = np.random.choice(par['room_width']*par['room_height'], size=len(par['rewards']), replace=False)
-		default_locs = [[1,1], [par['room_height']-2,par['room_width']-2], [1,par['room_width']-2], [par['room_height']-2],1]
+	def reset_rooms(self, trial_completion_vector):
 
-		# Assign one stimulus location per reward
-		self.stim_loc = []
+		trial_completion_vector = trial_completion_vector.astype(np.bool)
+		for t in range(par['batch_size']):
+			if trial_completion_vector[t]:
+				self.place_rewards(agent_id=t)
+				self.place_agents(agent_id=t)
+
+
+	def make_reward_locations(self):
+
+		inds = np.random.choice(par['room_width']*par['room_height'], size=len(par['rewards']), replace=False)
+
+		rew_locs = []
 		for i in range(len(par['rewards'])):
+			rew_loc = [int(inds[i]//par['room_width']), int(inds[i]%par['room_width'])]
+			rew_locs.append(tuple(rew_loc))
 
-			if par['use_default_rew_locs']:
-				if i >= len(default_locs):
-					raise Exception('Implement more default reward locations!')
-				rew_loc = default_locs[i]
-			else:
-				rew_loc = [int(rand_locs[i]//par['room_width']), int(rand_locs[i]%par['room_width'])]
-
-			self.stim_loc.append(rew_loc)
-
-		# One locations are assigned, place rewards at those locations
-		self.place_rewards()
+		return rew_locs
 
 
-	def place_rewards(self):
+	def place_rewards(self, agent_id='all'):
 
-		self.reward_locations = []
-		for i in range(par['batch_size']):
-			trial_set = {}
-			for r, loc in enumerate([self.stim_loc[ind] for ind in np.random.permutation(len(par['rewards']))]):
-				trial_set[tuple(loc)] = {'rew':par['rewards'][r], 'vec':par['reward_vectors'][r]}
-			self.reward_locations.append(trial_set)
-
-
-	def place_agents(self):
-
-		xs = np.random.choice(par['room_width'],size=par['batch_size'])
-		ys = np.random.choice(par['room_height'],size=par['batch_size'])
-		self.agent_loc = [[int(ys[i]), int(xs[i])] for i in range(par['batch_size'])]
-
-		self.loc_history = [self.agent_loc]
-
-
-	def identify_reward(self, location, i):
-
-		if tuple(location) in self.reward_locations[i].keys():
-			data = self.reward_locations[i][tuple(location)]
-			return data['rew'], data['vec']
+		if agent_id is 'all':
+			self.reward_locations = []
+			for i in range(par['batch_size']):
+				self.reward_locations.append(self.make_reward_locations())
 		else:
-			return None, None
+			self.reward_locations[agent_id] = self.make_reward_locations()
+
+
+	def place_agents(self, agent_id='all'):
+
+
+		if agent_id is 'all':
+			xs = np.random.choice(par['room_width'],size=par['batch_size'])
+			ys = np.random.choice(par['room_height'],size=par['batch_size'])
+			self.agent_loc = [[int(ys[i]), int(xs[i])] for i in range(par['batch_size'])]
+		else:
+			x = np.random.choice(par['room_width'])
+			y = np.random.choice(par['room_height'])
+			self.agent_loc[agent_id] = [int(y), int(x)]
+
+
+	def identify_reward(self, location, agent_id):
+
+		if tuple(location) in self.reward_locations[agent_id]:
+			reward_index = self.reward_locations[agent_id].index(tuple(location))
+			return self.rewards[reward_index], par['reward_vectors'][reward_index,:]
+		else:
+			return 0, None
 
 
 	def make_inputs(self):
@@ -115,8 +119,6 @@ class RoomStimulus:
 				if rew is not None:
 					reward[i] = rew
 
-		self.loc_history.append(copy.deepcopy(self.agent_loc))
-
 		return np.float32(reward)
 
 
@@ -125,33 +127,40 @@ class RoomStimulus:
 
 
 	def get_reward_locs(self):
-		return [list(rew.keys()) for rew in self.reward_locations]
+		return np.array(self.reward_locations).astype(np.int32)
+
 
 if __name__ == '__main__':
 
 	### Diagnostics
-	r = RoomStimulus()
+	r = Stimulus()
+	changes = np.random.choice([0,1],size=[par['batch_size']])
+	changes[0] = 1
 
-	inp = r.make_inputs()
-	inpsum = np.sum(inp[:,4:], axis=1)
+	for _ in range(4):
 
-	act = np.zeros([par['batch_size'], par['n_output']])
-	act[:,4] = 1
-	rew = r.agent_action(act, np.ones(par['batch_size']))
+		r.reset_rooms(changes)
 
-	print(np.mean(np.minimum(1, inpsum)))       # Check placement
-	print(np.mean(rew==1.), np.mean(rew==2.))   # Check rewards
+		inp = r.make_inputs()
+		inpsum = np.sum(inp[:,4:], axis=1)
 
-	agent_locs = r.get_agent_locs()
-	reward_locs = r.get_reward_locs()
+		act = np.zeros([par['batch_size'], par['n_output']])
+		act[:,4] = 1
+		rew = r.agent_action(act, np.ones(par['batch_size']))
 
-	demo_room = np.zeros([par['room_width'],par['room_height']])
-	t = 0
-	demo_room[agent_locs[t,1],agent_locs[t,0]] = 1
-	demo_room[reward_locs[t][0][1],reward_locs[t][0][0]] = -1
-	# demo_room[reward_locs[t][1][1],reward_locs[t][1][0]] = -2
+		print(np.mean(np.minimum(1, inpsum)))       # Check placement
+		print(np.mean(rew==1.), np.mean(rew==2.))   # Check rewards
 
-	import matplotlib.pyplot as plt
-	plt.imshow(demo_room)
-	plt.show()
+		agent_locs = r.get_agent_locs()
+		reward_locs = r.get_reward_locs()
+
+		demo_room = np.zeros([par['room_width'],par['room_height']])
+		t = 0
+		demo_room[agent_locs[t,1],agent_locs[t,0]] = 1
+		demo_room[reward_locs[t][0][1],reward_locs[t][0][0]] = -1
+		# demo_room[reward_locs[t][1][1],reward_locs[t][1][0]] = -2
+
+		import matplotlib.pyplot as plt
+		plt.imshow(demo_room)
+		plt.show()
 	

@@ -14,9 +14,8 @@ print('\n--> Loading parameters...')
 par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
-	'save_fn'				: '14_tasks_ver10_v1',
-	'train'					: True,
-	'save_weights'			: True,
+	'save_fn'				: 'maze_v1',
+	'LSTM_init'				: 0.02,
 	'w_init'				: 0.02,
 
 	# Network shape

@@ -212,7 +212,6 @@ def main(gpu_id = None):
 		with tf.device(device):
 			model = Model()
 
-
 		sess.run(tf.global_variables_initializer())
 
 		for i in range(par['n_batches']):
