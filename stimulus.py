@@ -81,8 +81,8 @@ class Stimulus:
 		inputs = np.zeros([par['batch_size'], par['n_input']])
 		inputs[:,0] = [agent[0] for agent in self.agent_loc]
 		inputs[:,1] = [agent[1] for agent in self.agent_loc]
-		inputs[:,2] = [par['room_height'] - agent[0] for agent in self.agent_loc]
-		inputs[:,3] = [par['room_width'] - agent[1] for agent in self.agent_loc]
+		inputs[:,2] = [(par['room_height']-1) - agent[0] for agent in self.agent_loc]
+		inputs[:,3] = [(par['room_width']-1) - agent[1] for agent in self.agent_loc]
 
 		for i in range(par['batch_size']):
 			_, vec = self.identify_reward(self.agent_loc[i], i)
@@ -139,31 +139,28 @@ if __name__ == '__main__':
 	r = Stimulus()
 	changes = np.random.choice([0,1],size=[par['batch_size']])
 	changes[0] = 1
+	changes[0] = 0
 
-	for _ in range(4):
+	import matplotlib.pyplot as plt
+	for i in range(10):
 
 		r.reset_rooms(changes)
+		if i == 5:
+			r.reset_rooms()
 
-		inp = r.make_inputs()
-		inpsum = np.sum(inp[:,4:], axis=1)
-
-		act = np.zeros([par['batch_size'], par['n_pol']])
-		act[:,4] = 1
-		rew = r.agent_action(act, np.ones(par['batch_size']))
-
-		print(np.mean(np.minimum(1, inpsum)))       # Check placement
-		print(np.mean(rew==1.), np.mean(rew==2.))   # Check rewards
+		stim_in = r.make_inputs()
+		print(stim_in[:2,:])
 
 		agent_locs = r.get_agent_locs()
 		reward_locs = r.get_reward_locs()
 
-		demo_room = np.zeros([par['room_width'],par['room_height']])
-		t = 0
-		demo_room[agent_locs[t,1],agent_locs[t,0]] = 1
-		demo_room[reward_locs[t][0][1],reward_locs[t][0][0]] = -1
-		# demo_room[reward_locs[t][1][1],reward_locs[t][1][0]] = -2
+		fig, ax = plt.subplots(1,2)
+		for t in range(2):
+			demo_room = np.zeros([par['room_width'],par['room_height']])
+			demo_room[agent_locs[t,1],agent_locs[t,0]] = 1
+			demo_room[reward_locs[t][0][1],reward_locs[t][0][0]] = -1
 
-		import matplotlib.pyplot as plt
-		plt.imshow(demo_room)
+			ax[t].imshow(demo_room)
+			ax[t].set_title('Iteration: {} | Room: {}'.format(i, t))
 		plt.show()
 	
