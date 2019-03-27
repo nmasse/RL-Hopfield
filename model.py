@@ -14,8 +14,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 # Model modules
-from parameters_v10 import *
-import stimulus_sequence
+from parameters import *
+import stimulus
 import time
 
 # Match GPU IDs to nvidia-smi command
@@ -90,7 +90,10 @@ class Model:
 
 	def policy(self):
 
-
+		"""
+		Calculate the policy and value functions based on the latent
+		representation and the read-out from the Hopfield network
+		"""
 		x1 = tf.nn.relu(self.encoding_out @ self.var_dict['W0'] + self.var_dict['b0'])
 		#x1 = tf.layers.dropout(x1, rate = par['drop_rate'], training = True)
 		x2 = tf.nn.relu(x1 @ self.var_dict['W1'] + self.var_dict['b2'])
@@ -102,7 +105,7 @@ class Model:
 	def calculate_encoder_grads(self):
 
 		"""
-		Update encoding weights
+		Calculate the gradient on the latent weights
 		"""
 		encoding_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'encoding')
 		self.encoding_optimizer = AdamOpt(encoding_vars, par['learning_rate'])
@@ -119,7 +122,7 @@ class Model:
 	def calculate_policy_grads(self):
 
 		"""
-		Perform gradient descent
+		Calculate the gradient on the policy/value weights
 		"""
 		RL_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='RL')
 		self.RL_optimizer = AdamOpt(RL_vars, par['learning_rate'])
@@ -129,7 +132,7 @@ class Model:
 		self.val_loss = 0.5*tf.reduce_mean(tf.square(advantage))
 
 		pol_out_softmax   = tf.nn.softmax(self.pol_out, axis = -1)
-		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage)*action \
+		self.pol_loss     = -tf.reduce_mean(tf.stop_gradient(advantage*self.action_pl) \
 			*tf.log(1e-6 + pol_out_softmax))
 		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(pol_out_softmax \
 			*tf.log(1e-6 + pol_out_softmax), axis = -1))
@@ -140,6 +143,9 @@ class Model:
 
 	def update_weights(self):
 
+		"""
+		Apply the weight changes
+		"""
 		self.update_weights = tf.group(*[self.encoding_optimizer.update_weights, \
 			self.RL_optimizer.update_weights])
 
@@ -191,8 +197,6 @@ def main(gpu_id = None):
 	if gpu_id is not None:
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
-	stim = stimulus_sequence.Stimulus()
-
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
 		if gpu_id == '0' else tf.GPUOptions()
 
@@ -228,35 +232,27 @@ def main(gpu_id = None):
 				action_index	= np.random.multinomial(pol, 1)
 				action 			= np.one_hot(tf.squeeze(action_index), par['n_pol'])
 
-				sess.run([model.update_hopfield], \
-					feed_dict = {stim: stimulus, action: action, reward: reward})
-
 				stimulus, reward = rooms
 				total_reward += reward
 				prev_val = val
 
-				sess.run(rl.train_RL, feed_dict = {rl.x0: latent, rl.action: action, \
-					rl.reward: reward, rl.prev_val: prev_val})
+				sess.run([model.update_hopfield, model.train_RL], \
+					feed_dict = {stim: stimulus, action: action, reward: reward, prev_val: prev_val})
+
+			sess.run(model.update_weights)
 
 
 
 def print_important_params():
 
-	notes = ''
-
-	keys = ['learning_method', 'n_hidden', 'n_latent', 'noise_in','noise_rnn','top_down',\
-		'A_alpha_init', 'A_beta_init', 'inner_steps', 'batch_norm_inner', 'learning_rate', \
-		'task_list', 'trials_per_seq', 'fix_break_penalty', 'wrong_choice_penalty', \
-		'correct_choice_reward', 'discount_rate', 'num_motion_dirs', 'sparsity_cost', 'n_filters', \
-		'rec_cost', 'weight_cost', 'entropy_cost', 'val_cost', 'drop_rate', 'batch_size', \
-		'n_batches', 'share_hippocampus', 'save_fn','temporal_div']
+	keys = ['learning_method', 'n_hidden', 'n_latent','learning_rate', \
+		'discount_rate', 'sparsity_cost','rec_cost', 'weight_cost', 'entropy_cost',
+		'val_cost', 'drop_rate', 'batch_size', \
+		'n_batches', 'save_fn','hopf_multiplier']
 
 	print('-'*60)
 	[print('{:<24} : {}'.format(k, par[k])) for k in keys]
-	print('{:<24} : {}'.format('notes', notes))
 	print('-'*60 + '\n')
-
-
 
 if __name__ == '__main__':
 	try:
