@@ -26,8 +26,8 @@ par = {
 	'n_hidden'				: [100, 100],
 	'n_pol'					: 5,
 	'n_val'					: 1,
-	'n_latent'				: 50,
-	'hopf_multiplier'		: 10,
+	'n_latent'				: 100,
+	'hopf_multiplier'		: 5,
 
 	# Hopfield configuration
 	'hopf_alpha'			: 0.999,
@@ -37,9 +37,9 @@ par = {
 	'covariance_method'		: False,
 
 	# Timings and rates
-	'learning_rate'			: 1e-4,
+	'learning_rate'			: 2e-7,
 	'drop_rate'				: 0.5,
-	'discount_rate'			: 0.8,
+	'discount_rate'			: 0.6,
 
 	# Task specs
 	'num_time_steps'		: 100,
@@ -57,11 +57,11 @@ par = {
 	'sparsity_cost'         : 1e-1, # was 1e-2
 	'rec_cost'				: 1e-3,  # was 1e-2
 	'weight_cost'           : 1e-2,  # was 1e-6
-	'entropy_cost'          : 0.05,
-	'val_cost'              : 0.01,
+	'entropy_cost'          : 0.02,
+	'val_cost'              : 0.001,
 
 	# Training specs
-	'batch_size'			: 64,
+	'batch_size'			: 256,
 
 }
 
@@ -144,12 +144,14 @@ def update_dependencies():
 	par['W_stim_write'] = np.zeros([par['hopf_multiplier'], par['n_latent'], par['n_hopf_stim']], dtype=np.float32)
 	for i,j in product(range(par['hopf_multiplier']), range(par['n_latent'])):
 		k = np.random.randint(par['hopf_multiplier'])
+		k = i
 		par['W_stim_write'][i, j, k + j*par['hopf_multiplier']] = 1.
 
 	N = 2*par['n_pol']
 	par['W_act_write'] = np.zeros([par['hopf_multiplier'], N, par['n_hopf_act']], dtype=np.float32)
 	for i,j in product(range(par['hopf_multiplier']), range(N)):
 		k = np.random.randint(par['hopf_multiplier'])
+		k = i
 		par['W_act_write'][i, j, i + j*par['hopf_multiplier']] = 1.
 
 	par['W_stim_read'] = np.sum(par['W_stim_write'], axis = 0)
