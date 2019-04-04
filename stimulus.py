@@ -82,7 +82,7 @@ class Stimulus:
 			reward_index = self.reward_locations[agent_id].index(tuple(location))
 			return self.rewards[reward_index], par['reward_vectors'][reward_index,:]
 		else:
-			return 0, None
+			return None, None
 
 
 	def make_inputs(self):
@@ -106,7 +106,7 @@ class Stimulus:
 		""" Takes in a vector of actions of size [batch_size, n_pol] """
 
 		action = np.argmax(action, axis=-1) # to [batch_size]
-		reward = np.zeros(par['batch_size'], dtype=np.float32)
+		reward = np.zeros(par['batch_size'], dtype=np.float32) - par['movement_penalty']
 
 		for i, a in enumerate(action):
 
