@@ -27,13 +27,14 @@ os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 class Model:
 
-	def __init__(self, stim, prev_latent, latent, prev_reward, reward, \
+	def __init__(self, stim, prev_latent, latent, hp_latent, prev_reward, reward, \
 		prev_action, action, prev_val, future_val):
 
 		# Placeholders
 		self.stim_pl		= stim
 		self.prev_latent_pl	= prev_latent
 		self.latent_pl		= latent
+		self.hop_latent_pl  = hp_latent
 		self.reward_pl		= reward
 		self.prev_reward_pl	= prev_reward
 		self.action_pl		= action
@@ -44,26 +45,27 @@ class Model:
 		self.declare_variables()
 		self.stimulus_encoding()
 		self.policy()
-		self.write_hopfield()
 		self.calculate_encoder_grads()
 		self.calculate_policy_grads()
+		self.write_hopfield()
 		self.update_weights()
 
 
 	def declare_variables(self):
 
 		self.var_dict = {}
-		encoding_prefixes   = ['W_enc0', 'W_dec0', 'W_dec1', 'b_enc0', \
-			'b_dec0', 'b_dec1']
-		VAE_prefixes = ['W_mu', 'W_sigma', 'b_mu', 'b_sigma']
-		RL_prefixes 		= ['W0', 'W1', 'b0', 'b1' ,'W_pol', 'W_val', 'b_pol', 'b_val']
+		encoding_prefixes = ['W_enc0', 'W_dec0', 'W_dec1', 'b_enc0', 'b_dec0', 'b_dec1']
+		VAE_prefixes      = ['W_mu', 'W_sigma', 'b_mu', 'b_sigma']
+		RL_prefixes       = ['W0', 'W1', 'b0', 'b1' ,'W_pol', 'W_val', 'b_pol', 'b_val']
 
 		with tf.variable_scope('encoding'):
 			for p in encoding_prefixes + VAE_prefixes:
 				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
+
 		with tf.variable_scope('RL'):
 			for p in RL_prefixes:
 				self.var_dict[p] = tf.get_variable(p, initializer = par[p + '_init'])
+
 		with tf.variable_scope('hopfield'):
 			self.H_sas = tf.get_variable('H_sas', shape = [par['batch_size'], par['n_latent'], \
 				par['n_pol'],par['n_latent']], initializer=tf.zeros_initializer(), trainable = False)
@@ -158,17 +160,15 @@ class Model:
 		self.RL_optimizer = AdamOpt.AdamOpt(RL_vars, par['learning_rate'])
 
 		not_terminal_state = tf.cast(tf.equal(self.reward_pl, tf.constant(0.)), tf.float32)
-		advantage 			= self.reward_pl + par['discount_rate']*self.future_val_pl*not_terminal_state \
-			- self.val_out
-		self.val_loss	 	= 0.5*tf.reduce_mean(tf.square(advantage))
-		self.pol_loss    	= -tf.reduce_mean(tf.stop_gradient(advantage)*self.action_pl \
-			*tf.log(1e-9 + self.pol_out))
-		self.entropy_loss 	= -tf.reduce_mean(tf.reduce_sum(self.pol_out \
-			*tf.log(1e-9 + self.pol_out), axis = -1))
+		advantage = self.reward_pl + par['discount_rate']*self.future_val_pl*not_terminal_state - self.val_out
+		self.val_loss = 0.5*tf.reduce_mean(tf.square(advantage))
+		self.pol_loss = -tf.reduce_mean(tf.stop_gradient(advantage)*self.action_pl*tf.log(1e-9 + self.pol_out))
+		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol_out*tf.log(1e-9 + self.pol_out), axis = -1))
 
 		self.loss = self.pol_loss + par['val_cost']*self.val_loss \
 			- par['entropy_cost']*self.entropy_loss
 		self.train_RL = self.RL_optimizer.compute_gradients(self.loss)
+
 
 	def update_weights(self):
 
@@ -220,29 +220,28 @@ class Model:
 
 	def write_hopfield(self):
 
-		hopf_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='hopfield')
-		print(hopf_vars)
+		norm_lambda  = lambda x : 1e-9 + tf.sqrt(tf.reduce_sum(x**2, axis=1, keepdims=True))
 
-		latent = self.latent_pl/(1e-9 + tf.sqrt(tf.reduce_sum(self.latent_pl**2, axis = 1, keepdims=True)))
-		prev_latent = self.prev_latent_pl/(1e-9 + tf.sqrt(tf.reduce_sum(self.prev_latent_pl**2, axis = 1, keepdims=True)))
+		latent       = self.hop_latent_pl / norm_lambda(self.hop_latent_pl)
+		prev_latent  = self.prev_latent_pl / norm_lambda(self.prev_latent_pl)
 
 		state_action = tf.einsum('ij,ik->ijk', prev_latent, self.prev_action_pl)
-		H_sas_grad = tf.einsum('ijk,im->ijkm', state_action, latent)
-		H_sar_grad = tf.einsum('ijk,im->ijkm', state_action, self.prev_reward_pl)
+		H_sas_grad   = tf.einsum('ijk,im->ijkm', state_action, latent)
+		H_sar_grad   = tf.einsum('ijk,im->ijkm', state_action, self.prev_reward_pl)
 
 		alpha = 0.9999
-		reset_ops = []
-		update_ops = []
-		for var in hopf_vars:
-			if 'H_sas' in var.op.name:
-				update_ops.append(tf.assign(var, alpha*var + H_sas_grad))
-				reset_ops.append(tf.assign(var, 0.*var))
-			elif 'H_sar' in var.op.name:
-				update_ops.append(tf.assign(var, alpha*var + H_sar_grad))
-				reset_ops.append(tf.assign(var, 0.*var))
+		reset_ops  = [\
+			tf.assign(self.H_sas, 0.*self.H_sas), \
+			tf.assign(self.H_sar, 0.*self.H_sar)  ]
+		update_ops = [\
+			tf.assign(self.H_sas, alpha*self.H_sas + H_sas_grad), \
+			tf.assign(self.H_sar, alpha*self.H_sar + H_sar_grad)  ]
 
 		self.update_hopfield = tf.group(*update_ops)
 		self.reset_hopfield = tf.group(*reset_ops)
+
+		with tf.control_dependencies([self.train_RL, self.hopfield_read]):
+			self.update_hopfield_with_dep = self.update_hopfield
 
 
 def main(gpu_id = None):
@@ -256,7 +255,7 @@ def main(gpu_id = None):
 
 	# Reduce memory consumption for GPU 0
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
-		if gpu_id == '0' else tf.GPUOptions()
+		if gpu_id == '3' else tf.GPUOptions()
 
 	# Initialize stimulus environment
 	environment = stimulus.Stimulus()
@@ -266,6 +265,7 @@ def main(gpu_id = None):
 	stim_pl     	= tf.placeholder(tf.float32, [par['batch_size'], par['n_input']], 'stim')
 	prev_latent_pl  = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'prev_latent')
 	latent_pl  		= tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'latent')
+	hop_latent_pl   = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'hp_latent')
 	prev_action_pl  = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'prev_action')
 	action_pl    	= tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
 	reward_pl 	 	= tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'reward')
@@ -279,7 +279,7 @@ def main(gpu_id = None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(stim_pl, prev_latent_pl, latent_pl, prev_reward_pl, \
+			model = Model(stim_pl, prev_latent_pl, latent_pl, hop_latent_pl, prev_reward_pl, \
 				reward_pl, prev_action_pl, action_pl, prev_val_pl, future_val_pl)
 
 		sess.run(tf.global_variables_initializer())
@@ -293,15 +293,15 @@ def main(gpu_id = None):
 			x_read_list = []
 
 			# Pre-allocate prev_val and total_reward
-			prev_latent = np.zeros((par['batch_size'], par['n_latent']), dtype = np.float32)
-			prev_action = np.zeros((par['batch_size'], par['n_pol']), dtype = np.float32)
-			prev_reward_scalar = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
-			prev_reward_matrix = np.zeros((par['batch_size'], par['n_unique_vals']), dtype = np.float32)
-			prev_val = np.zeros((par['batch_size'], par['n_val']), dtype = np.float32)
-			total_reward = np.zeros((par['batch_size'],1), dtype = np.float32)
+			prev_latent        = np.zeros((par['batch_size'], par['n_latent']), dtype=np.float32)
+			prev_action        = np.zeros((par['batch_size'], par['n_pol']), dtype=np.float32)
+			prev_reward_scalar = np.zeros((par['batch_size'], par['n_val']), dtype=np.float32)
+			prev_reward_matrix = np.zeros((par['batch_size'], par['n_unique_vals']), dtype=np.float32)
+			prev_val           = np.zeros((par['batch_size'], par['n_val']), dtype=np.float32)
+			total_reward       = np.zeros((par['batch_size'], 1), dtype=np.float32)
 
-			action_record = []
-			H_stim_record = []
+			action_record  = []
+			H_stim_record  = []
 			H_act_f_record = []
 
 			# Iterate through time
@@ -311,8 +311,7 @@ def main(gpu_id = None):
 				stim_in = environment.make_inputs()
 
 				# Generate the latent, train encoder weights
-				_, reconstruction_loss, latent_loss, latent, latent_mu, latent_log_var, \
-					sparsity_loss = \
+				_, reconstruction_loss, latent_loss, latent, latent_mu, latent_log_var, sparsity_loss = \
 					sess.run([model.train_encoder, model.reconstruction_loss, model.latent_loss, \
 					model.latent, model.latent_mu, model.latent_log_var, model.sparsity_loss], \
 					feed_dict = {stim_pl: stim_in})
@@ -322,7 +321,6 @@ def main(gpu_id = None):
 				# Generate the policy and value functions
 				pol, val, hopfield_read = sess.run([model.pol_out, model.val_out, model.hopfield_read], \
 					feed_dict = {latent_pl: latent})
-
 
 				# Choose action, calculate reward and determine next state
 				action = np.array([np.random.multinomial(1, pol[t,:]-1e-6) for t in range(par['batch_size'])])
@@ -347,31 +345,10 @@ def main(gpu_id = None):
 				total_reward += reward
 
 				# Update the Hopfield network
-				"""
-				_,_  = sess.run([model.update_hopfield, model.train_RL], \
-					feed_dict = {latent_pl: latent, prev_latent_pl: prev_latent, \
-					action_pl: action, prev_action_pl: prev_action, \
-					prev_reward_pl: prev_reward, reward_pl: reward, prev_val_pl: prev_val})
-				"""
-
-				sess.run([model.train_RL, model.hopfield_read], \
-					feed_dict = {latent_pl: prev_latent,  action_pl: prev_action, \
-					reward_pl: prev_reward_scalar, future_val_pl: val})
-
-
-
-				sess.run([model.update_hopfield], \
-					feed_dict = {prev_latent_pl: prev_latent, latent_pl: latent, \
-					prev_action_pl: prev_action, prev_reward_pl: prev_reward_matrix})
-
-				"""
-				latent /= (1e-9+np.sqrt(np.sum(latent**2, axis = 1, keepdims = True)))
-				prev_latent /= (1e-9+np.sqrt(np.sum(prev_latent**2, axis = 1, keepdims = True)))
-				z = np.sum(latent*prev_latent,axis = 1)
-				print('Mean z', np.mean(z))
-				plt.plot(z)
-				plt.show()
-				"""
+				sess.run([model.update_hopfield_with_dep, model.train_RL, model.hopfield_read], \
+					feed_dict = {latent_pl: prev_latent, action_pl: prev_action, reward_pl: prev_reward_scalar, \
+					future_val_pl: val, prev_latent_pl : prev_latent, hop_latent_pl : latent, \
+					prev_action_pl: prev_action, prev_reward_pl : prev_reward_matrix})
 
 				prev_latent = latent+0.
 				prev_reward_matrix = reward_one_hot+0.
@@ -412,11 +389,13 @@ def main(gpu_id = None):
 			# Output network performance
 			if i%10==0:
 				H_sas, H_sar = sess.run([model.H_sas, model.H_sar])
-				print('H_sas', np.mean(H_sas**2), 'H_sar', np.mean(H_sar**2))
 				#print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:8.6f} | Sparsity Loss: {:8.6f} | Sim act.: {:8.6f} | Action Dist: {}'.format(\
 				#	i, np.mean(total_reward), rec_loss, sparsity_loss, sim_active, action_record))
-				print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:8.6f} | Latent Loss: {:8.6f} | Latent Mu: {:8.6f} | Latent Var: {:8.6f}  | Sparisty Loss: {:8.6f}'.format(\
-					i, np.mean(total_reward), reconstruction_loss, latent_loss, np.mean(latent_mu), np.mean(latent_log_var), sparsity_loss))
+				print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:8.6f} | Latent Loss: {:8.6f} |'.format(\
+					i, np.mean(total_reward), reconstruction_loss, latent_loss))
+				print('          | Latent Mu: {:8.6f} | Latent Var: {:8.6f}  | Sparisty Loss: {:8.6f}'.format(\
+					np.mean(latent_mu), np.mean(latent_log_var), sparsity_loss))
+				print('          | H_sas', np.mean(H_sas**2), '| H_sar', np.mean(H_sar**2))
 			if i%200==0 and par['train_encoder'] and i>0:
 				weights = sess.run(model.var_dict)
 				results = {'weights': weights, 'latent': latent}

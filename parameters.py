@@ -52,6 +52,7 @@ par = {
 	'room_width'			: 8,
 	'room_height'			: 8,
 	'use_default_rew_locs'	: False,
+	'movement_penalty'		: 0.,
 
 	# Cost values
 	'sparsity_cost'         : 5e2, # was 1e-2
