@@ -17,7 +17,7 @@ class Stimulus:
 		frames = [imresize(f, (100, 84, 3)) for f in frame_list]
 
 		# Combine batch of frames into an array
-		frames = np.stack(frame_list, axis=0).astype(np.float32)
+		frames = np.stack(frames, axis=0).astype(np.float32)
 
 		# Convert values to a range of 0 to 1
 		frames = frames/255
@@ -82,8 +82,11 @@ class Stimulus:
 		# Update and obtain framebuffer
 		obs = self.update_framebuffer(obs)
 
+		# Clarify reward structure
+		r = np.sign(np.array(r).astype(np.float32))
+
 		# Return observation and reward as float32 arrays
-		return obs, np.array(r).astype(np.float32)
+		return obs, r
 
 
 

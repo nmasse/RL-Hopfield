@@ -2,8 +2,9 @@
 
 import numpy as np
 import pickle
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from itertools import product
+import gym
 
 print('\n--> Loading parameters...')
 
@@ -27,7 +28,7 @@ par = {
 	'n_encoding'			: [200, 200],
 	'n_pol'					: 4,
 	'n_val'					: 1,
-	'n_latent'				: 512,
+	'n_latent'				: 1024,
 	'hopf_multiplier'		: 10,
 
 	# Hopfield configuration
@@ -46,7 +47,9 @@ par = {
 	'num_time_steps'		: 600,
 	'num_batches'			: 10000000,
 
-	# Maze task specs
+	# Task specs
+	'gym_env'				: 'SpaceInvaders-v0',
+	'task'					: 'atari',
 	'rewards'				: [1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
 	'room_width'			: 8,
@@ -120,6 +123,9 @@ def update_weights(var_dict):
 
 def update_dependencies():
 	""" Updates all parameter dependencies """
+
+
+
 
 	# Set input and output sizes
 	par['n_input']  = par['num_nav_tuned'] + par['num_fix_tuned'] + par['num_rew_tuned'] + par['num_rule_tuned']

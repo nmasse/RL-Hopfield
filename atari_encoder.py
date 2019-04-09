@@ -6,9 +6,9 @@
 ###		# latent.shape     == [trials x n_latent]
 ###		# new_latent.shape == [trials x ?]
 ###
-###		latent, conv_shapes = encoder(atari_frames, n_latent)
+###		latent, loss, conv_shapes = encoder(atari_frames, n_latent)
 ###		<operate on latent, including resizing if desired>
-###		reconstruction      = decoder(new_latent, conv_shapes)
+###		reconstruction            = decoder(new_latent, conv_shapes)
 
 
 # Required packages
@@ -22,7 +22,7 @@ def filter_init(size):
 	return tf.random_uniform(size, -0.1, 0.1)
 
 
-def dense_layer(x, n_out, name):
+def dense_layer(x, n_out, name, activation=tf.nn.relu):
 	""" Build a dense layer with RELU activation
 		x		: input tensor to propagate
 		n_out	: number of neurons in layer
@@ -33,7 +33,9 @@ def dense_layer(x, n_out, name):
 	W = tf.get_variable('W_'+name, shape=[n_in, n_out])
 	b = tf.get_variable('b_'+name, shape=[1, n_out])
 
-	return tf.nn.relu(x @ W + b)
+	y = x @ W + b
+
+	return activation(y)
 
 
 def conv_layer(x, n_filter, n_kernel, stride, name):
@@ -103,9 +105,9 @@ def encoder(data0, n_latent):
 		conv2  = conv_layer(conv1, n_filter=32, n_kernel=4, stride=2, name='conv2')
 
 		# Flatten convolution output, apply dense layers to make latent vector
-		flat0  = tf.reshape(conv2, [batch_size, -1])					# 1344
-		dense  = dense_layer(flat0, n_out=256,      name='dense0')		# 256
-		latent = dense_layer(dense, n_out=n_latent, name='latent0')		# 64
+		flat0  = tf.reshape(conv2, [batch_size, -1])
+		dense  = dense_layer(flat0, n_out=256,      name='dense0')
+		latent = dense_layer(dense, n_out=n_latent, name='latent0', activation=tf.identity)
 
 	# Collect the convolutional shapes for later decovolution
 	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2]]
