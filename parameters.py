@@ -53,7 +53,7 @@ par = {
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
 	'task'					: 'atari',
-	'rewards'				: [1.],
+	'rewards'				: [-1., 1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
 	'room_width'			: 8,
 	'room_height'			: 8,
@@ -68,7 +68,7 @@ par = {
 	'latent_cost'			: 0.00000,
 
 	# Training specs
-	'batch_size'			: 1,
+	'batch_size'			: 32,
 	'train_encoder'			: True,
 	'load_encoder_weights'	: False,
 
