@@ -17,18 +17,21 @@ par = {
 	'save_fn'				: 'maze_4x4_test',
 	'LSTM_init'				: 0.02,
 	'w_init'				: 0.02,
+	'RL_method'				: 'policy',
 
 	# Network shape
 	'num_nav_tuned'			: 4,		# Must be 4 for maze task (replaced motion neurons)
-	'num_fix_tuned'			: 1,
+	'num_fix_tuned'			: 0,
 	'num_rule_tuned'		: 0,
-	'num_rew_tuned'			: 10,		# For reward vector in maze task
-	'n_hidden'				: [100, 100],
-	'n_encoding'			: [200, 200],
+	'num_rew_tuned'			: 1,		# For reward vector in maze task
+	'n_hidden'				: [200, 200],
+	'n_encoding'			: [64, 128],
 	'n_pol'					: 4,
 	'n_val'					: 1,
-	'n_latent'				: 512,
-	'hopf_multiplier'		: 10,
+	'n_latent'				: 128,
+	'n_dend'				: 25,
+	'act_mult'				: 4,
+	'dend_th'				: 8,
 
 	# Hopfield configuration
 	'hopf_alpha'			: 0.95,
@@ -43,7 +46,7 @@ par = {
 	'discount_rate'			: 0.9,
 
 	# Task specs
-	'num_time_steps'		: 600,
+	'num_time_steps'		: 1,
 	'num_batches'			: 10000000,
 
 	# Maze task specs
@@ -55,16 +58,16 @@ par = {
 	'movement_penalty'		: 0.,
 
 	# Cost values
-	'sparsity_cost'         : 5e2, # was 1e-2
+	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
 	'entropy_cost'          : 0.05,
 	'val_cost'              : 0.01,
 	'latent_cost'			: 0.00000,
 
 	# Training specs
-	'batch_size'			: 64,
-	'train_encoder'			: False,
-	'load_encoder_weights'	: True,
+	'batch_size'			: 1,
+	'train_encoder'			: True,
+	'load_encoder_weights'	: False,
 
 }
 
@@ -90,21 +93,24 @@ def update_parameters(updates, verbose=True, update_deps=True):
 
 def load_encoder_weights():
 
-	fn = './savedir/VAE_8x8_model_weights3.pkl'
+	fn = './savedir/VAE_8x8_n32_model_weights.pkl'
 	results = pickle.load(open(fn, 'rb'))
 
 
 	print('Weight keys ', results['weights'].keys())
 	par['W_enc0_init'] = results['weights']['W_enc0']
+	par['W_enc1_init'] = results['weights']['W_enc1']
 	par['W_dec0_init'] = results['weights']['W_dec0']
 	par['W_dec1_init'] = results['weights']['W_dec1']
+	par['W_dec2_init'] = results['weights']['W_dec2']
 	par['W_mu_init'] = results['weights']['W_mu']
-	par['W_sigma_init'] = results['weights']['W_sigma']
 	par['b_enc0_init'] = results['weights']['b_enc0']
+	par['b_enc1_init'] = results['weights']['b_enc1']
 	par['b_dec0_init'] = results['weights']['b_dec0']
 	par['b_dec1_init'] = results['weights']['b_dec1']
+	par['b_dec2_init'] = results['weights']['b_dec2']
 	par['b_mu_init'] = results['weights']['b_mu']
-	par['b_sigma_init'] = results['weights']['b_sigma']
+
 
 
 def update_weights(var_dict):
@@ -126,9 +132,8 @@ def update_dependencies():
 	par['n_pol'] = par['num_actions']
 
 	par['n_unique_vals'] = len(par['rewards']) + 1
+	par['n_val'] = 4 if par['RL_method'] == 'Q-learning' else 1
 
-	par['n_hopf_stim'] = par['n_latent']*par['hopf_multiplier']
-	par['n_hopf_act'] = 2*par['n_pol']*par['hopf_multiplier']
 
 	# Specify one-hot vectors matching with each reward for maze task
 	condition = True
@@ -144,21 +149,23 @@ def update_dependencies():
 		par['W_enc0_init'] = np.random.uniform(-c, c, size=[par['n_input'], par['n_encoding'][0]]).astype(np.float32)
 		par['W_enc1_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_encoding'][1]]).astype(np.float32)
 		par['W_mu_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][1], par['n_latent']]).astype(np.float32)
+		#par['W_mu_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_latent']]).astype(np.float32)
 		par['W_sigma_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][1], par['n_latent']]).astype(np.float32)
 		par['W_dec0_init'] = np.random.uniform(-c, c, size=[par['n_latent'], par['n_encoding'][0]]).astype(np.float32)
-		#par['W_dec1_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_encoding'][1]]).astype(np.float32)
-		par['W_dec1_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_input']]).astype(np.float32)
-		#par['W_dec2_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][1], par['n_input']]).astype(np.float32)
+		par['W_dec1_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_encoding'][1]]).astype(np.float32)
+		#par['W_dec1_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_input']]).astype(np.float32)
+		par['W_dec2_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][1], par['n_input']]).astype(np.float32)
+		#par['W_dec2_init'] = np.random.uniform(-c, c, size=[par['n_encoding'][0], par['n_input']]).astype(np.float32)
 		par['b_enc0_init'] = np.zeros([1, par['n_encoding'][0]], dtype=np.float32)
 		par['b_enc1_init'] = np.zeros([1, par['n_encoding'][1]], dtype=np.float32)
-		par['b_dec0_init'] = np.zeros([1, par['n_encoding'][1]], dtype=np.float32)
-		#par['b_dec1_init'] = np.zeros([1, par['n_encoding'][0]], dtype=np.float32)
-		par['b_dec1_init'] = np.zeros([1, par['n_input']], dtype=np.float32)
-		#par['b_dec2_init'] = np.zeros([1, par['n_input']], dtype=np.float32)
+		par['b_dec0_init'] = np.zeros([1, par['n_encoding'][0]], dtype=np.float32)
+		par['b_dec1_init'] = np.zeros([1, par['n_encoding'][1]], dtype=np.float32)
+		#par['b_dec1_init'] = np.zeros([1, par['n_input']], dtype=np.float32)
+		par['b_dec2_init'] = np.zeros([1, par['n_input']], dtype=np.float32)
 		par['b_mu_init'] = np.zeros([1, par['n_latent']], dtype=np.float32)
 		par['b_sigma_init'] = np.zeros([1, par['n_latent']], dtype=np.float32)
 
-	N = (len(par['rewards']) + 1)*par['n_pol'] + par['n_latent'] + 8
+	N = (len(par['rewards']) + 1)*par['n_pol'] + par['n_latent'] + 8 + 8
 	par['W0_init'] = np.random.uniform(-c, c, size=[N, par['n_hidden'][0]]).astype(np.float32)
 	par['W1_init'] = np.random.uniform(-c, c, size=[par['n_hidden'][0], par['n_hidden'][1]]).astype(np.float32)
 	par['b0_init'] = np.zeros([1, par['n_hidden'][0]], dtype=np.float32)
@@ -167,9 +174,10 @@ def update_dependencies():
 
 	par['W_pol_init'] = np.random.uniform(-c, c, size=[par['n_hidden'][1], par['n_pol']]).astype(np.float32)
 	par['b_pol_init'] = np.zeros([1,par['n_pol']], dtype=np.float32)
-	par['W_val_init'] = np.random.uniform(-c, c, size=[par['n_hidden'][1], 1]).astype(np.float32)
-	par['b_val_init'] = np.zeros([1,1], dtype=np.float32)
+	par['W_val_init'] = np.random.uniform(-c, c, size=[par['n_hidden'][1], par['n_val']]).astype(np.float32)
+	par['b_val_init'] = np.zeros([1,par['n_val']], dtype=np.float32)
 
+	"""
 	par['W_stim_write'] = np.zeros([par['num_time_steps'], par['n_latent'], par['n_hopf_stim']], dtype=np.float32)
 	for i,j in product(range(par['num_time_steps']), range(par['n_latent'])):
 		for _ in range(1):
@@ -194,6 +202,7 @@ def update_dependencies():
 	#	m = i*par['hopf_multiplier']
 	#	par['H_stim_mask'][m+j,m+k] = 0.
 	"""
+	"""
 	plt.imshow(par['W_stim_write'][0,:,:], aspect = 'auto')
 	plt.colorbar()
 	plt.show()
@@ -201,9 +210,6 @@ def update_dependencies():
 	plt.colorbar()
 	plt.show()
 	"""
-
-	par['H_old_new_mask'] = np.ones((par['n_hopf_stim'], par['n_hopf_stim']), dtype = np.float32)
-	par['H_old_new_mask'] -= np.tril(par['H_old_new_mask'], -1)
 
 	par['action_template'] = []
 	for i in range(par['n_pol']):
