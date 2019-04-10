@@ -36,10 +36,12 @@ class Model:
 		self.latent, conv_shapes = \
 			ae.encoder(self.stim, par['n_latent'])
 
-		top_k, _ = tf.nn.top_k(self.latent, k=np.int32(par['n_latent']*0.05))
-		self.latent = tf.where(self.latent < top_k[:,-2:-1], tf.zeros(self.latent.shape), self.latent)
-		self.binary = tf.where(self.latent < top_k[:,-2:-1], tf.zeros(self.latent.shape), tf.ones(self.latent.shape))
+		k = 50
+		top_k, _ = tf.nn.top_k(self.latent, k=k)
+		self.binary = tf.where(self.latent >= top_k[:,k-1:k], tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
+		self.latent = tf.where(self.latent >= top_k[:,k-1:k], self.latent, tf.zeros(self.latent.shape))
 		# self.latent = self.latent * (0.1+self.binary)
+		self.top_k = top_k
 
 		print('\nMany frames with bottleneck, using linear\n')
 
@@ -56,7 +58,7 @@ class Model:
 		var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
 		self.var_dict = {var.op.name : var for var in var_list}
 
-		self.recon_loss = tf.reduce_mean(tf.square(self.stim - self.recon))
+		self.recon_loss = tf.constant(0.) #tf.reduce_mean(tf.square(self.stim - self.recon))
 		self.latent_loss = 0.01*tf.reduce_mean(tf.abs(self.latent))
 
 		opt = tf.train.AdamOptimizer(5e-4)
@@ -98,11 +100,11 @@ def main(gpu_id = None):
 			reward_list = []
 			obs = environment.reset_environments()
 			
-			for t in range(2000):
+			for t in range(1000):
 
-				_, latent, rec, binary, recon_loss, latent_loss, action = \
+				_, latent, rec, binary, recon_loss, latent_loss, action, top_k = \
 					sess.run([model.train, model.latent, model.recon, model.binary, \
-						model.recon_loss, model.latent_loss, model.action], \
+						model.recon_loss, model.latent_loss, model.action, model.top_k], \
 						feed_dict = {x : obs})
 
 				obs, reward = environment.agent_action(action)
@@ -110,12 +112,35 @@ def main(gpu_id = None):
 
 			print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:7.5f} | Latent Loss: {:7.5f} |'.format(\
 				i, np.mean(reward_list), recon_loss, latent_loss))
-			# print(np.reshape(np.sum(binary, axis=0)[:128], [8, 16]).astype(np.int32))
+
+			# print(latent)
+			print('Mean +/- Std'.ljust(20), np.mean(latent), '+/-', np.std(latent))
+			print('Min/Max'.ljust(20), latent.min(), '/', latent.max())
+
+			print('Num Nonzero'.ljust(20), np.count_nonzero(latent))
+			# quit()
+
+			# print(top_k)
+			# print(top_k[:,49:50])
+
+			# c = np.sum(binary, axis=0)
+			# uniques, counts = np.unique(c, return_counts=True)
+			# for u, c in zip(uniques.astype(np.int32), counts):
+			# 	print('Val: {:>3} | Occ: {:>3}'.format(u,c))
+			# print('')
+			# print('Counts')
+			# print(np.sum(binary, axis=0))
+			print('Verify across neurons')
+			print(np.sum(binary, axis=1))
+			print('Verify total')
+			print(np.sum(binary))
+			print()
+			quit()
 
 			fig, ax = plt.subplots(1,2)
 			ax[0].imshow(obs[0,...,-1], aspect='auto', cmap='gray')
 			ax[1].imshow(rec[0,...,-1], aspect='auto', cmap='gray')
-			plt.savefig('./savedir/2000_frames_bottle_linear_iter{}_recon.png'.format(i))
+			plt.savefig('./savedir/testing_1000_frames_bottle_linear_iter{}_recon.png'.format(i))
 			plt.clf()
 			plt.close()
 
