@@ -14,59 +14,80 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # Model modules
-from parameters import *
 import atari_stimulus as stimulus
+from atari_parameters import par
 import atari_encoder as ae
 
 # Match GPU IDs to nvidia-smi command
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 
 # Ignore Tensorflow startup warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
+def dense_layer(x, n_out, name, activation=tf.nn.relu):
+	""" Build a dense layer with RELU activation
+		x		: input tensor to propagate
+		n_out	: number of neurons in layer
+		name	: name of the layer
+	"""
+
+	n_in = x.shape.as_list()[-1]
+	W = tf.get_variable('W_'+name, shape=[n_in, n_out])
+	b = tf.get_variable('b_'+name, shape=[1, n_out])
+
+	y = x @ W + b
+
+	return activation(y)
 
 
 class Model:
 
-	def __init__(self, stim):
+	def __init__(self, stim, boost_d):
 
 		t0 = time.time()
 
 		self.stim = stim
+		self.boost_d = boost_d
 
-		self.latent, conv_shapes = \
-			ae.encoder(self.stim, par['n_latent'])
+		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'])
 
-		k = 50
-		top_k, _ = tf.nn.top_k(self.latent, k=k)
-		self.binary = tf.where(self.latent >= top_k[:,k-1:k], tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
-		self.latent = tf.where(self.latent >= top_k[:,k-1:k], self.latent, tf.zeros(self.latent.shape))
-		# self.latent = self.latent * (0.1+self.binary)
-		self.top_k = top_k
+		boosted_latent = self.latent * tf.exp(par['boost_level']*(par['num_k']/par['n_latent'] - self.boost_d))
+		top_k, _ = tf.nn.top_k(boosted_latent, k=par['num_k'])
 
-		print('\nMany frames with bottleneck, using linear\n')
+		self.binary = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
+		self.latent = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], self.latent, tf.zeros(self.latent.shape))
 
 		self.action = tf.random_uniform([par['batch_size'], 6], 0, 1)
 
 		latent_vec = tf.concat([self.latent, self.action], axis=-1)
 		self.recon = ae.decoder(latent_vec, conv_shapes)
 
+		self.sparse = tf.zeros_like(self.latent)
+		self.latent_hat = tf.zeros_like(self.latent)
+
 		self.optimize()
 
 
 	def optimize(self):
 
+		opt = tf.train.AdamOptimizer(par['learning_rate'])
 		var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
 		self.var_dict = {var.op.name : var for var in var_list}
+		print('Variables:')
+		[print(var.op.name.ljust(20), ':', var.shape) for var in var_list]
+		print()
 
-		self.recon_loss = tf.constant(0.) #tf.reduce_mean(tf.square(self.stim - self.recon))
-		self.latent_loss = 0.01*tf.reduce_mean(tf.abs(self.latent))
+		self.recon_loss = tf.reduce_mean(tf.square(self.stim - self.recon))
+		self.latent_loss = 1e-3*tf.reduce_mean(tf.square(self.latent))
 
-		opt = tf.train.AdamOptimizer(5e-4)
-		self.train = opt.minimize(self.recon_loss + self.latent_loss)
+		total_loss = self.recon_loss + self.latent_loss
+		self.train = opt.minimize(total_loss)
 
 
+def main(gpu_id=None):
 
-def main(gpu_id = None):
+	print('Saving to:', par['savefn'])
 
 	# Select GPU
 	if gpu_id is not None:
@@ -74,7 +95,7 @@ def main(gpu_id = None):
 
 	# Reduce memory consumption for GPU 0
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
-		if gpu_id == '0' else tf.GPUOptions()
+		if gpu_id == '3' else tf.GPUOptions()
 
 	# Initialize stimulus environment
 	environment = stimulus.Stimulus()
@@ -82,6 +103,7 @@ def main(gpu_id = None):
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
 	x = tf.placeholder(tf.float32, [par['batch_size'], 100, 84, 4], 'input')
+	d = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'boost_d')
 
 	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
@@ -89,8 +111,7 @@ def main(gpu_id = None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(x)
-
+			model = Model(x, d)
 		sess.run(tf.global_variables_initializer())
 
 		# Start training loop
@@ -99,50 +120,71 @@ def main(gpu_id = None):
 			
 			reward_list = []
 			obs = environment.reset_environments()
+			t_range = par['frames_per_iter'] // par['k_skip']
 			
-			for t in range(1000):
+			stored_action = np.random.rand(par['batch_size'], 6)
+			duty = (par['num_k']/par['n_latent'])*np.ones([par['batch_size'], par['n_latent']]).astype(np.float32)
+			for t in range(t_range):
 
-				_, latent, rec, binary, recon_loss, latent_loss, action, top_k = \
+				# Run the model
+				_, latent, rec, binary, recon_loss, latent_loss, action = \
 					sess.run([model.train, model.latent, model.recon, model.binary, \
-						model.recon_loss, model.latent_loss, model.action, model.top_k], \
-						feed_dict = {x : obs})
+						model.recon_loss, model.latent_loss, model.action], \
+						feed_dict = {x : obs, d : duty})
 
-				obs, reward = environment.agent_action(action)
-				reward_list.append(reward)
+				# Update boost duty cycle calculation
+				duty = (1-par['boost_alpha']) * binary + par['boost_alpha'] * duty
 
-			print('Iter {:>4} | Mean Reward: {:6.3f} | Recon Loss: {:7.5f} | Latent Loss: {:7.5f} |'.format(\
+				# Have first four frames
+				last_obs = obs
+
+				# Generate next four frames
+				for _ in range(par['k_skip']):
+					obs, reward = environment.agent_action(stored_action)
+					reward_list.append(reward)
+
+				# Do a sess.run here to train the predictive autoencoder
+				# _, pred = sess.run([model.train_enc, model.pred], feed_dict = {x : last_obs})
+
+
+			print('Iter {:>4} | MR: {:6.3f} | Recon Loss: {:7.5f} | Latent Loss: {:7.5f} |'.format(\
 				i, np.mean(reward_list), recon_loss, latent_loss))
 
-			# print(latent)
-			print('Mean +/- Std'.ljust(20), np.mean(latent), '+/-', np.std(latent))
-			print('Min/Max'.ljust(20), latent.min(), '/', latent.max())
+			c = np.sum(binary, axis=0)
+			uniques, counts = np.unique(c, return_counts=True)
+			for u, c in zip(uniques.astype(np.int32), counts):
+				print('Frq: {:>4}/{:} | Occ: {:>3}'.format(u,par['batch_size'],c))
+			print('')
 
-			print('Num Nonzero'.ljust(20), np.count_nonzero(latent))
-			# quit()
+			if i%5 == 0:
 
-			# print(top_k)
-			# print(top_k[:,49:50])
+				obs = last_obs
 
-			# c = np.sum(binary, axis=0)
-			# uniques, counts = np.unique(c, return_counts=True)
-			# for u, c in zip(uniques.astype(np.int32), counts):
-			# 	print('Val: {:>3} | Occ: {:>3}'.format(u,c))
-			# print('')
-			# print('Counts')
-			# print(np.sum(binary, axis=0))
-			print('Verify across neurons')
-			print(np.sum(binary, axis=1))
-			print('Verify total')
-			print(np.sum(binary))
-			print()
-			quit()
+				fig, ax = plt.subplots(2,4,figsize=(12,8))
+				ax[0,0].imshow(obs[0,...,0], aspect='auto', cmap='gray', clim=(obs[0].min(),obs[0].max()))
+				ax[0,1].imshow(obs[0,...,1], aspect='auto', cmap='gray', clim=(obs[0].min(),obs[0].max()))
+				ax[0,2].imshow(obs[0,...,2], aspect='auto', cmap='gray', clim=(obs[0].min(),obs[0].max()))
+				ax[0,3].imshow(obs[0,...,3], aspect='auto', cmap='gray', clim=(obs[0].min(),obs[0].max()))
+				ax[1,0].imshow(rec[0,...,0], aspect='auto', cmap='gray', clim=(rec[0].min(),rec[0].max()))
+				ax[1,1].imshow(rec[0,...,1], aspect='auto', cmap='gray', clim=(rec[0].min(),rec[0].max()))
+				ax[1,2].imshow(rec[0,...,2], aspect='auto', cmap='gray', clim=(rec[0].min(),rec[0].max()))
+				ax[1,3].imshow(rec[0,...,3], aspect='auto', cmap='gray', clim=(rec[0].min(),rec[0].max()))
 
-			fig, ax = plt.subplots(1,2)
-			ax[0].imshow(obs[0,...,-1], aspect='auto', cmap='gray')
-			ax[1].imshow(rec[0,...,-1], aspect='auto', cmap='gray')
-			plt.savefig('./savedir/testing_1000_frames_bottle_linear_iter{}_recon.png'.format(i))
-			plt.clf()
-			plt.close()
+				ax[0,0].set_title('Frame {}'.format(t*par['k_skip']-3))
+				ax[0,1].set_title('Frame {}'.format(t*par['k_skip']-2))
+				ax[0,2].set_title('Frame {}'.format(t*par['k_skip']-1))
+				ax[0,3].set_title('Frame {}'.format(t*par['k_skip']))
+
+				ax[0,0].set_ylabel('Observation')
+				ax[1,0].set_ylabel('Reconstruction')
+
+				for j in range(8):
+					ax[j//4,j%4].set_xticks([])
+					ax[j//4,j%4].set_yticks([])
+
+				plt.savefig('./savedir/'+par['savefn']+'_iter{:0>5}_recon.png'.format(i), bbox_inches='tight')
+				plt.clf()
+				plt.close()
 
 
 

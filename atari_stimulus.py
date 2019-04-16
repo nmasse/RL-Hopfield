@@ -2,7 +2,7 @@ import numpy as np
 from scipy.misc import imresize
 from collections import deque
 import gym
-from parameters import par
+from atari_parameters import par
 
 
 class Stimulus:
@@ -31,7 +31,7 @@ class Stimulus:
 	def update_framebuffer(self, update, initialize=False):
 
 		if initialize:
-			self.framebuffer = deque([update]*4)
+			self.framebuffer = deque([update]*par['k_skip'])
 		else:
 			self.framebuffer.popleft()
 			self.framebuffer.append(update)
@@ -99,12 +99,12 @@ if __name__ == '__main__':
 	print('Stimulus loaded and reset.')
 
 	t0 = time.time()
-	for i in range(100):
+	for i in range(1000):
 		act = np.random.rand(par['batch_size'], 6)
-		# s.envs[0].render()
+		s.envs[0].render()
 		o, r = s.agent_action(act)
 	print(time.time() - t0)
 
-	for i in range(10):
-		plt.imshow(np.mean(o[i,...], axis=-1), aspect='auto', cmap='gray')
-		plt.show()
+	# for i in range(10):
+	# 	plt.imshow(np.mean(o[i,...], axis=-1), aspect='auto', cmap='gray')
+	# 	plt.show()

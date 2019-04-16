@@ -38,7 +38,7 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 	return activation(y)
 
 
-def conv_layer(x, n_filter, n_kernel, stride, name):
+def conv_layer(x, n_filter, n_kernel, stride, name, activation=tf.nn.relu):
 	""" Build a convolutional layer from the provided data
 		x			: input tensor to be convolved
 		n_filter	: number of output filters
@@ -56,12 +56,12 @@ def conv_layer(x, n_filter, n_kernel, stride, name):
 	
 	# Generate convolution operation
 	strides = [1, stride, stride, 1]
-	y = tf.nn.relu(tf.nn.conv2d(x, f, strides, 'SAME'))
+	y = activation(tf.nn.conv2d(x, f, strides, 'SAME'))
 	
 	return y
 
 
-def deconv_layer(x, n_filter, n_kernel, stride, shape, name):
+def deconv_layer(x, n_filter, n_kernel, stride, shape, name, activation=tf.nn.relu):
 	""" Build a convolutional layer from the provided data
 		x			: input tensor to be deconvolved
 		n_filter	: number of output filters
@@ -80,7 +80,7 @@ def deconv_layer(x, n_filter, n_kernel, stride, shape, name):
 
 	# Generate deconvolution operation
 	strides = [1, stride, stride, 1]
-	y = tf.nn.relu(tf.nn.conv2d_transpose(x, f, shape, strides, 'SAME'))
+	y = activation(tf.nn.conv2d_transpose(x, f, shape, strides, 'SAME'))
 
 	return y
 
@@ -100,17 +100,19 @@ def encoder(data0, n_latent):
 	with tf.variable_scope('encoder'):
 
 		# Run convolutional layers to compress input data
-		conv0  = conv_layer(data0, n_filter=16, n_kernel=8, stride=4, name='conv0')
-		conv1  = conv_layer(conv0, n_filter=32, n_kernel=4, stride=2, name='conv1')
-		conv2  = conv_layer(conv1, n_filter=32, n_kernel=4, stride=2, name='conv2')
+		conv0  = conv_layer(data0, n_filter=32, n_kernel=2, stride=1, name='conv0')
+		conv1  = conv_layer(conv0, n_filter=32, n_kernel=8, stride=4, name='conv1')
+		conv2  = conv_layer(conv1, n_filter=64, n_kernel=4, stride=2, name='conv2')
+		conv3  = conv_layer(conv2, n_filter=64, n_kernel=4, stride=2, name='conv3')
 
 		# Flatten convolution output, apply dense layers to make latent vector
-		flat0  = tf.reshape(conv2, [batch_size, -1])
-		dense  = dense_layer(flat0, n_out=256,      name='dense0')
-		latent = dense_layer(dense, n_out=n_latent, name='latent0', activation=tf.identity)
+		flat0  = tf.reshape(conv3, [batch_size, -1])
+		dense0 = dense_layer(flat0,  n_out=2048,     name='dense0')
+		dense1 = dense_layer(dense0, n_out=2048,     name='dense1')
+		latent = dense_layer(dense1, n_out=n_latent, name='latent0', activation=tf.identity)
 
 	# Collect the convolutional shapes for later decovolution
-	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2]]
+	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2, conv3]]
 
 	return latent, conv_shapes
 
@@ -134,13 +136,16 @@ def decoder(latent, conv_shapes):
 	with tf.variable_scope('decoder'):
 
 		# Apply dense layers from latent vector, reshape for deconvolution
-		dense0  = dense_layer(latent, n_out=256, name='dense0')
-		dense1  = dense_layer(dense0, n_out=n,   name='dense1')
-		unflat0 = tf.reshape(dense1, conv_shapes[-1])
+		dense0  = dense_layer(latent, n_out=2048, name='dense0')
+		dense1  = dense_layer(latent, n_out=2048, name='dense1')
+		dense2  = dense_layer(dense0, n_out=n,    name='dense2')
+		unflat0 = tf.reshape(dense2, conv_shapes[-1])
 
 		# Run deconvolutional layers to produce reconstruction
-		deconv0 = deconv_layer(unflat0, n_filter=32, n_kernel=4, stride=2, shape=s[0], name='deconv0')
-		deconv1 = deconv_layer(deconv0, n_filter=16, n_kernel=4, stride=2, shape=s[1], name='deconv1')
-		recon   = deconv_layer(deconv1, n_filter=4 , n_kernel=8, stride=4, shape=s[2], name='deconv2')
+		deconv0 = deconv_layer(unflat0, n_filter=64, n_kernel=4, stride=2, shape=s[0], name='deconv0')
+		deconv1 = deconv_layer(deconv0, n_filter=32, n_kernel=4, stride=2, shape=s[1], name='deconv1')
+		deconv2 = deconv_layer(deconv1, n_filter=32, n_kernel=8, stride=4, shape=s[2], name='deconv2')
+		recon   = deconv_layer(deconv2, n_filter=4 , n_kernel=2, stride=1, shape=s[3], name='deconv3', activation=tf.identity)
+		# recon   = deconv_layer(deconv1, n_filter=4 , n_kernel=8, stride=4, shape=s[2], name='deconv3', activation=tf.identity)
 
 	return recon
