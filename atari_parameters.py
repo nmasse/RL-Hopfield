@@ -13,6 +13,7 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'RL_method'				: 'policy',
+	'train_autoencoder'		: True,
 
 	# Network shape
 	'n_hidden'				: [200, 200],

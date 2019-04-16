@@ -45,42 +45,51 @@ class Model:
 
 	def __init__(self, stim, boost_d):
 
-		t0 = time.time()
-
+		# Gather placeholders
 		self.stim = stim
 		self.boost_d = boost_d
 
-		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'])
+		# Run encoder
+		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'], var_dict=None, trainable=par['train_autoencoder'])
 
+		# Calculate post-boost top_k
 		boosted_latent = self.latent * tf.exp(par['boost_level']*(par['num_k']/par['n_latent'] - self.boost_d))
 		top_k, _ = tf.nn.top_k(boosted_latent, k=par['num_k'])
 
+		# Filter the latent encoding
 		self.binary = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
 		self.latent = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], self.latent, tf.zeros(self.latent.shape))
 
+		# Randomly select an action
 		self.action = tf.random_uniform([par['batch_size'], 6], 0, 1)
 
+		# Concatenate the latent encoding and the action
 		latent_vec = tf.concat([self.latent, self.action], axis=-1)
-		self.recon = ae.decoder(latent_vec, conv_shapes)
 
-		self.sparse = tf.zeros_like(self.latent)
-		self.latent_hat = tf.zeros_like(self.latent)
+		# Run decoder
+		self.recon = ae.decoder(latent_vec, conv_shapes, var_dict=None, trainable=par['train_autoencoder'])
 
+		# Run optimizer
 		self.optimize()
 
 
 	def optimize(self):
 
-		opt = tf.train.AdamOptimizer(par['learning_rate'])
+		# Collect all variables in the model and list them out
 		var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
 		self.var_dict = {var.op.name : var for var in var_list}
 		print('Variables:')
 		[print(var.op.name.ljust(20), ':', var.shape) for var in var_list]
 		print()
 
+		# Make optimizer
+		opt = tf.train.AdamOptimizer(par['learning_rate'])
+
+		# Calculate losses
 		self.recon_loss = tf.reduce_mean(tf.square(self.stim - self.recon))
 		self.latent_loss = 1e-3*tf.reduce_mean(tf.square(self.latent))
 
+		# Aggregate loss and run optimizer
 		total_loss = self.recon_loss + self.latent_loss
 		self.train = opt.minimize(total_loss)
 
