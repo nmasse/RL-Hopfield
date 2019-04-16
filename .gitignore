@@ -2,6 +2,7 @@
 sftp-config.json
 dqn.py
 savedir/
+plotdir/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
