@@ -113,7 +113,7 @@ def encoder(data0, n_latent, var_dict=None, trainable=True):
 		if not trainable:
 			print('Encoder is manually set to be untrainable,')
 			print('but no pre-trained variables are provided.')
-			print('--> Setting trainable to true.')
+			print('--> Setting trainable to true.\n')
 			trainable = True
 
 	# Obtain batch size
@@ -156,7 +156,7 @@ def decoder(latent, conv_shapes, var_dict=None, trainable=True):
 		if not trainable:
 			print('Decoder is manually set to be untrainable,')
 			print('but no pre-trained variables are provided.')
-			print('--> Setting trainable to true.')
+			print('--> Setting trainable to true.\n')
 			trainable = True
 
 	# Get the number of elements to produce from the dense layer

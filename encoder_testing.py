@@ -50,15 +50,18 @@ class Model:
 		self.boost_d = boost_d
 
 		# Run encoder
-		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'], var_dict=None, trainable=par['train_autoencoder'])
+		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'], \
+			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
 
 		# Calculate post-boost top_k
-		boosted_latent = self.latent * tf.exp(par['boost_level']*(par['num_k']/par['n_latent'] - self.boost_d))
+		boosted_latent = self.latent * \
+			tf.exp(par['boost_level']*(par['num_k']/par['n_latent'] - self.boost_d))
 		top_k, _ = tf.nn.top_k(boosted_latent, k=par['num_k'])
 
 		# Filter the latent encoding
-		self.binary = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
-		self.latent = tf.where(boosted_latent >= top_k[:,par['num_k']-1:par['num_k']], self.latent, tf.zeros(self.latent.shape))
+		boost_cond = boosted_latent >= top_k[:,par['num_k']-1:par['num_k']]
+		self.binary = tf.where(boost_cond, tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
+		self.latent = tf.where(boost_cond, self.latent, tf.zeros(self.latent.shape))
 
 		# Randomly select an action
 		self.action = tf.random_uniform([par['batch_size'], 6], 0, 1)
@@ -67,7 +70,8 @@ class Model:
 		latent_vec = tf.concat([self.latent, self.action], axis=-1)
 
 		# Run decoder
-		self.recon = ae.decoder(latent_vec, conv_shapes, var_dict=None, trainable=par['train_autoencoder'])
+		self.recon = ae.decoder(latent_vec, conv_shapes, \
+			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
 
 		# Run optimizer
 		self.optimize()
@@ -123,6 +127,10 @@ def main(gpu_id=None):
 			model = Model(x, d)
 		sess.run(tf.global_variables_initializer())
 
+		# Make lists for recording model performance
+		recon_loss_record  = []
+		latent_loss_record = []
+
 		# Start training loop
 		print('Starting training.\n')
 		for i in range(par['num_batches']):
@@ -140,6 +148,10 @@ def main(gpu_id=None):
 					sess.run([model.train, model.latent, model.recon, model.binary, \
 						model.recon_loss, model.latent_loss, model.action], \
 						feed_dict = {x : obs, d : duty})
+
+				# Record performance
+				recon_loss_record.append(recon_loss)
+				latent_loss_record.append(latent_loss)
 
 				# Update boost duty cycle calculation
 				duty = (1-par['boost_alpha']) * binary + par['boost_alpha'] * duty
@@ -165,7 +177,17 @@ def main(gpu_id=None):
 				print('Frq: {:>4}/{:} | Occ: {:>3}'.format(u,par['batch_size'],c))
 			print('')
 
-			if i%5 == 0:
+			if i%10 == 0:
+
+				data = {
+					'weights'			: sess.run(model.var_dict),
+					'recon_loss'		: recon_loss_record,
+					'latent_loss'		: latent_loss_record,
+					'input_data'		: last_obs,
+					'reconstruction'	: rec
+				}
+
+				pickle.dump(data, open(par['savedir']+par['savefn']+'.pkl', 'wb'))
 
 				obs = last_obs
 
@@ -191,7 +213,8 @@ def main(gpu_id=None):
 					ax[j//4,j%4].set_xticks([])
 					ax[j//4,j%4].set_yticks([])
 
-				plt.savefig('./savedir/'+par['savefn']+'_iter{:0>5}_recon.png'.format(i), bbox_inches='tight')
+				plt.suptitle('Iter {} Reconstruction'.format(i))
+				plt.savefig(par['plotdir']+par['savefn']+'_recon.png'.format(i), bbox_inches='tight')
 				plt.clf()
 				plt.close()
 

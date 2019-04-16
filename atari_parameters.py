@@ -12,8 +12,8 @@ print('\n--> Loading parameters...')
 par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
+	'plotdir'				: './plotdir/',
 	'RL_method'				: 'policy',
-	'train_autoencoder'		: True,
 
 	# Network shape
 	'n_hidden'				: [200, 200],
@@ -50,7 +50,7 @@ par = {
 	'task'					: 'atari',
 	'frames_per_iter'		: 1000,
 	'k_skip'				: 4,
-	'rewards'				: [1.],
+	'rewards'				: [-1.,1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
 	'room_width'			: 8,
 	'room_height'			: 8,
@@ -66,8 +66,8 @@ par = {
 
 	# Training specs
 	'batch_size'			: 64,
-	'train_encoder'			: True,
-	'load_encoder_weights'	: False,
+	'train_encoder'			: False,
+	'load_weights'			: True,
 
 }
 
@@ -89,10 +89,18 @@ def update_parameters(updates, verbose=True, update_deps=True):
 		update_dependencies()
 
 
+def load_encoder_weights():
+
+	fn = par['savedir'] + '200boost_2x2filter_test' + '.pkl'
+	var_dict = pickle.load(open(fn, 'rb'))['weights']
+	return var_dict
+
+
 def update_dependencies():
 	""" Updates all parameter dependencies """
 
-	par['savefn'] = '{}boost_2x2filter'.format(int(par['boost_level']))
+
+	par['savefn'] = '{}boost_2x2filter_test'.format(int(par['boost_level']))
 
 	par['num_k'] = int(par['n_latent'] * par['prop_top'])
 
@@ -101,6 +109,11 @@ def update_dependencies():
 		p = np.zeros((par['batch_size'], par['n_pol']), dtype = np.float32)
 		p[:, i] = 1.
 		par['action_template'].append(p)
+
+	if par['load_weights']:
+		par['loaded_var_dict'] = load_encoder_weights()
+	else:
+		par['loaded_var_dict'] = None
 
 
 
