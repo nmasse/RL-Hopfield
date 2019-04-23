@@ -10,7 +10,7 @@ from itertools import product
 
 # Plotting suite
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # Model modules
@@ -159,7 +159,7 @@ def main(gpu_id=None):
 
 		reward_list = []
 
-		for t in range(par['num_frames']):
+		for fr in range(par['num_frames']//par['k_skip']):
 
 			# Run the model
 			pol, val, binary, y, _, _, _ = sess.run([model.pol, model.val, model.binary, \
@@ -179,7 +179,7 @@ def main(gpu_id=None):
 			done = np.zeros((par['batch_size'], 1))
 			for _ in range(par['k_skip']):
 				new_obs, reward_frame, done_frame = environment.agent_action(action)
-				reward += np.reshape(reward_frame,(-1,1))
+				reward += reward_frame
 				done += done_frame
 				reward_list.append(reward)
 
@@ -195,15 +195,15 @@ def main(gpu_id=None):
 				r : reward, f: future_val, ts: done})
 
 			obs = new_obs
-			if t%200==0:
+			if fr%200==0:
 				W_pos, W_neg, W_trace_pos, W_trace_neg = \
 					sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
 				display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, \
-					reward, reward_list, y, i, t)
+					reward, reward_list, y, fr)
 
 
 
-def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, i, t):
+def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):
 
 	"""
 	plt.imshow(W_trace_pos[0,:,:], aspect = 'auto')
@@ -220,8 +220,8 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 	W_trace_pos = np.mean(W_trace_pos,axis=0)
 	W_trace_neg = np.mean(W_trace_neg,axis=0)
 	print('mean pol ', np.mean(pol, axis = 0), 'mean reward ', np.mean(reward))
-	print('Iter {:>4} Time | {:>4} | y>0: {:6.3f} | W_pos: {:6.3f} | W_neg {:6.3f} | W_t_pos: {:6.3f} | W_t_neg {:6.3f} | MR: {:6.3f}'.format(i, \
-		t, np.mean(y>0), np.mean(W_pos>0),np.mean(W_neg>0),np.mean(W_trace_pos>0),\
+	print('Frame {:>4} | y>0: {:6.3f} | W_pos: {:6.3f} | W_neg {:6.3f} | W_t_pos: {:6.3f} | W_t_neg {:6.3f} | MR: {:6.3f}'.format(\
+		t*par['k_skip'], np.mean(y>0), np.mean(W_pos>0),np.mean(W_neg>0),np.mean(W_trace_pos>0),\
 		np.mean(W_trace_neg>0), np.mean(reward_list)))
 
 
@@ -237,8 +237,8 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 	ax[1,3].imshow(W_trace_neg, aspect='auto', cmap='gray', clim=(W_trace_neg.min(),W_trace_neg.max()))
 
 
-	plt.suptitle('Iter {} Striatum'.format(i))
-	plt.savefig(par['plotdir']+par['savefn']+'_recon.png'.format(i), bbox_inches='tight')
+	plt.suptitle('Frame {} Striatum'.format(t*par['k_skip']))
+	plt.savefig(par['plotdir']+par['savefn']+'_recon.png', bbox_inches='tight')
 	plt.clf()
 	plt.close()
 
