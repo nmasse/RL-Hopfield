@@ -85,8 +85,10 @@ class Stimulus:
 		# Clarify reward structure
 		r = np.sign(np.array(r).astype(np.float32))
 
+		reward = np.stack(reward).astype(np.float32)
+
 		# Return observation and reward as float32 arrays
-		return obs, r
+		return obs, reward, done # reward is unmodified
 
 
 

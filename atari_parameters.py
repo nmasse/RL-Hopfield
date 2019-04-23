@@ -25,9 +25,9 @@ par = {
 	'act_mult'				: 4,
 	'dend_th'				: 8,
 
-	'prop_top'				: 0.05,
-	'boost_level'			: 200.,
-	'boost_alpha'			: 5e-3,
+	'prop_top'				: 1.,
+	'boost_level'			: 2.,
+	'boost_alpha'			: 1e-3,
 
 	# Hopfield configuration
 	'hopf_alpha'			: 0.95,
@@ -36,10 +36,17 @@ par = {
 	'hopf_cycles'			: 6,
 	'covariance_method'		: True,
 
+	# Striatum params
+	'n_striatum'			: 2,
+	'striatum_th'			: 0.5, # was 0.5
+	'trace_th'				: 10., # was 10
+	'n_out'					: 1024,
+	'trace_decay'			: 0.8,
+
 	# Timings and rates
-	'learning_rate'			: 5e-4,
-	'drop_rate'				: 0.5,
-	'discount_rate'			: 0.9,
+	'learning_rate'			: 1e-5,
+	'drop_rate'				: 0.,
+	'discount_rate'			: 0.99,
 
 	# Task specs
 	'num_time_steps'		: 1,
@@ -48,7 +55,7 @@ par = {
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
 	'task'					: 'atari',
-	'frames_per_iter'		: 1000,
+	'frames_per_iter'		: 2500000000,
 	'k_skip'				: 4,
 	'rewards'				: [-1.,1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
@@ -60,14 +67,19 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.05,
+	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.01,
 	'latent_cost'			: 0.00000,
 
+
+	'n_filters'				: [32,64,64],
+	'n_kernels'				: [8,4,4], # originally 8,4,4
+	'n_stride'				: [4,2,2], # originally 4,2,2
+
 	# Training specs
-	'batch_size'			: 64,
-	'train_encoder'			: False,
-	'load_weights'			: True,
+	'batch_size'			: 512,
+	'train_encoder'			: True,
+	'load_weights'			: False,
 
 }
 
@@ -100,7 +112,7 @@ def update_dependencies():
 	""" Updates all parameter dependencies """
 
 
-	par['savefn'] = '{}boost_2x2filter_test'.format(int(par['boost_level']))
+	par['savefn'] = '{}boost_striatum_v1'.format(int(par['boost_level']))
 
 	par['num_k'] = int(par['n_latent'] * par['prop_top'])
 
