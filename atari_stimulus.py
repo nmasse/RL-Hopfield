@@ -10,6 +10,7 @@ class Stimulus:
 	def __init__(self):
 
 		self.envs = [gym.make(par['gym_env']) for _ in range(par['batch_size'])]
+		
 
 	def preprocess(self, frame_list):
 
@@ -61,20 +62,22 @@ class Stimulus:
 
 		obs    = [] # Aggregate observations
 		reward = [] # Aggregate rewards
+		done   = [] # Aggregate completion states
 
 		# Iterate over trials per batch
 		for i in range(par['batch_size']):
 
 			# Apply the desired action
-			o, r, done, _ = self.envs[i].step(action[i])
+			o, r, d, _ = self.envs[i].step(action[i])
 
 			# Reset the environment the episode is complete
-			if done:
+			if d:
 				o = self.envs[i].reset()
 
 			# Collect observation and reward
 			obs.append(o)
 			reward.append(r)
+			done.append(d)
 
 		# Preprocess batch of frames
 		obs = self.preprocess(obs)
@@ -82,10 +85,8 @@ class Stimulus:
 		# Update and obtain framebuffer
 		obs = self.update_framebuffer(obs)
 
-		# Clarify reward structure
-		r = np.sign(np.array(r).astype(np.float32))
-
-		reward = np.stack(reward).astype(np.float32)
+		# Clarify reward structure (may apply np.sign in the future)
+		reward = np.array(reward).astype(np.float32)
 
 		# Return observation and reward as float32 arrays
 		return obs, reward, done # reward is unmodified
@@ -101,10 +102,13 @@ if __name__ == '__main__':
 	print('Stimulus loaded and reset.')
 
 	t0 = time.time()
-	for i in range(1000):
+	for i in range(4000):
 		act = np.random.rand(par['batch_size'], 6)
 		s.envs[0].render()
-		o, r = s.agent_action(act)
+		o, r, d = s.agent_action(act)
+		print(i, d)
+		if d[0] == True:
+			time.sleep(1)
 	print(time.time() - t0)
 
 	# for i in range(10):

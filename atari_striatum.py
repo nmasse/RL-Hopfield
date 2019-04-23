@@ -10,7 +10,7 @@ from itertools import product
 
 # Plotting suite
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # Model modules
@@ -126,18 +126,9 @@ def main(gpu_id=None):
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
 		if gpu_id == '3' else tf.GPUOptions()
 
-	# Initialize stimulus environment
+	# Initialize stimulus environment and obtain first observations
 	environment = stimulus.Stimulus()
-
-	t0 = time.time()
 	obs = environment.reset_environments()
-	print('reset_environments', time.time() - t0)
-
-	action = np.array(np.stack([np.random.multinomial(1, [0.25,0.25,0.25,0.25]) for i in range(par['batch_size'])]))
-	t0 = time.time()
-	new_obs, reward_frame, done_frame = environment.agent_action(action)
-	print('action', time.time() - t0)
-	1/0
 
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
@@ -167,27 +158,31 @@ def main(gpu_id=None):
 		reward = np.zeros([par['batch_size'], 1], np.float32)
 		#val = np.zeros([par['batch_size'], 1], np.float32)
 
-		for i in range(par['num_batches']):
+		reward_list = []
 
-			reward_list = []
-			t0 = time.time()
-			obs = environment.reset_environments()
-			print('Time', time.time() - t0)
+		for fr in range(par['num_frames']//par['k_skip']):
 
-			for t in range(par['frames_per_iter']):
+			# Run the model
+			pol, val, binary, y, _, _, _ = sess.run([model.pol, model.val, model.binary, \
+				model.y, model.update_traces, model.update_weights, model.normalize_weights], \
+				feed_dict = {x : obs, d : duty, r : reward})
 
-				# Run the model
-				pol, val, binary, y, _, _, _ = sess.run([model.pol, model.val, model.binary, \
-					model.y, model.update_traces, model.update_weights, model.normalize_weights], \
-					feed_dict = {x : obs, d : duty, r : reward})
+			# Update boost duty cycle calculation
+			duty = (1-par['boost_alpha']) * duty  \
+				+ par['boost_alpha'] * np.mean(binary, axis = 0, keepdims = True)
 
-				# Update boost duty cycle calculation
-				duty = (1-par['boost_alpha']) * duty  \
-					+ par['boost_alpha'] * np.mean(binary, axis = 0, keepdims = True)
+			# choose action, determine reward
+			#print('pol', pol.shape)
+			action = np.array(np.stack([np.random.multinomial(1, pol[i,:]-1e-6) for i in range(par['batch_size'])]))
 
-				# choose action, determine reward
-				#print('pol', pol.shape)
-				action = np.array(np.stack([np.random.multinomial(1, pol[i,:]-1e-6) for i in range(par['batch_size'])]))
+			# Generate next four frames
+			reward = np.zeros((par['batch_size'], 1))
+			done = np.zeros((par['batch_size'], 1))
+			for _ in range(par['k_skip']):
+				new_obs, reward_frame, done_frame = environment.agent_action(action)
+				reward += reward_frame
+				done += done_frame
+				reward_list.append(reward)
 
 				# Generate next four frames
 				reward = np.zeros((par['batch_size'], 1))
@@ -203,23 +198,20 @@ def main(gpu_id=None):
 				if len(reward_list) >= 1000:
 					reward_list = reward_list[1:]
 
-				# calculate the value function of the next four frames
-				future_val = sess.run(model.val, feed_dict = {x : new_obs, d : duty})
+			# train the model
+			sess.run([model.train], feed_dict = {x : obs, d : duty, a: action, \
+				r : reward, f: future_val, ts: done})
 
-				# train the model
-				sess.run([model.train], feed_dict = {x : obs, d : duty, a: action, \
-					r : reward, f: future_val, ts: done})
-
-				obs = new_obs
-				if t%200==0:
-					W_pos, W_neg, W_trace_pos, W_trace_neg = \
-						sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
-					display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, \
-						reward, reward_list, y, i, t)
+			obs = new_obs
+			if fr%200==0:
+				W_pos, W_neg, W_trace_pos, W_trace_neg = \
+					sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
+				display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, \
+					reward, reward_list, y, fr)
 
 
 
-def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, i, t):
+def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):
 
 	"""
 	plt.imshow(W_trace_pos[0,:,:], aspect = 'auto')
@@ -236,8 +228,8 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 	W_trace_pos = np.mean(W_trace_pos,axis=0)
 	W_trace_neg = np.mean(W_trace_neg,axis=0)
 	print('mean pol ', np.mean(pol, axis = 0), 'mean reward ', np.mean(reward))
-	print('Iter {:>4} Time | {:>4} | y>0: {:6.3f} | W_pos: {:6.3f} | W_neg {:6.3f} | W_t_pos: {:6.3f} | W_t_neg {:6.3f} | MR: {:6.3f}'.format(i, \
-		t, np.mean(y>0), np.mean(W_pos>0),np.mean(W_neg>0),np.mean(W_trace_pos>0),\
+	print('Frame {:>4} | y>0: {:6.3f} | W_pos: {:6.3f} | W_neg {:6.3f} | W_t_pos: {:6.3f} | W_t_neg {:6.3f} | MR: {:6.3f}'.format(\
+		t*par['k_skip'], np.mean(y>0), np.mean(W_pos>0),np.mean(W_neg>0),np.mean(W_trace_pos>0),\
 		np.mean(W_trace_neg>0), np.mean(reward_list)))
 
 
@@ -253,8 +245,8 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 	ax[1,3].imshow(W_trace_neg, aspect='auto', cmap='gray', clim=(W_trace_neg.min(),W_trace_neg.max()))
 
 
-	plt.suptitle('Iter {} Striatum'.format(i))
-	plt.savefig(par['plotdir']+par['savefn']+'_recon.png'.format(i), bbox_inches='tight')
+	plt.suptitle('Frame {} Striatum'.format(t*par['k_skip']))
+	plt.savefig(par['plotdir']+par['savefn']+'_recon.png', bbox_inches='tight')
 	plt.clf()
 	plt.close()
 
