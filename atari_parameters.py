@@ -51,7 +51,7 @@ par = {
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
 	'task'					: 'atari',
-	'frames_per_iter'		: 2500000000,
+	'num_frames'			: 2500000000,
 	'k_skip'				: 4,
 	'rewards'				: [-1.,1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
