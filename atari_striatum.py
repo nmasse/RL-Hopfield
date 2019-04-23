@@ -125,8 +125,9 @@ def main(gpu_id=None):
 	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
 		if gpu_id == '3' else tf.GPUOptions()
 
-	# Initialize stimulus environment
+	# Initialize stimulus environment and obtain first observations
 	environment = stimulus.Stimulus()
+	obs = environment.reset_environments()
 
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
@@ -156,52 +157,49 @@ def main(gpu_id=None):
 		reward = np.zeros([par['batch_size'], 1], np.float32)
 		#val = np.zeros([par['batch_size'], 1], np.float32)
 
-		for i in range(par['num_batches']):
+		reward_list = []
 
-			reward_list = []
-			obs = environment.reset_environments()
+		for t in range(par['num_frames']):
 
-			for t in range(par['frames_per_iter']):
+			# Run the model
+			pol, val, binary, y, _, _, _ = sess.run([model.pol, model.val, model.binary, \
+				model.y, model.update_traces, model.update_weights, model.normalize_weights], \
+				feed_dict = {x : obs, d : duty, r : reward})
 
-				# Run the model
-				pol, val, binary, y, _, _, _ = sess.run([model.pol, model.val, model.binary, \
-					model.y, model.update_traces, model.update_weights, model.normalize_weights], \
-					feed_dict = {x : obs, d : duty, r : reward})
+			# Update boost duty cycle calculation
+			duty = (1-par['boost_alpha']) * duty  \
+				+ par['boost_alpha'] * np.mean(binary, axis = 0, keepdims = True)
 
-				# Update boost duty cycle calculation
-				duty = (1-par['boost_alpha']) * duty  \
-					+ par['boost_alpha'] * np.mean(binary, axis = 0, keepdims = True)
+			# choose action, determine reward
+			#print('pol', pol.shape)
+			action = np.array(np.stack([np.random.multinomial(1, pol[i,:]-1e-6) for i in range(par['batch_size'])]))
 
-				# choose action, determine reward
-				#print('pol', pol.shape)
-				action = np.array(np.stack([np.random.multinomial(1, pol[i,:]-1e-6) for i in range(par['batch_size'])]))
+			# Generate next four frames
+			reward = np.zeros((par['batch_size'], 1))
+			done = np.zeros((par['batch_size'], 1))
+			for _ in range(par['k_skip']):
+				new_obs, reward_frame, done_frame = environment.agent_action(action)
+				reward += np.reshape(reward_frame,(-1,1))
+				done += done_frame
+				reward_list.append(reward)
 
-				# Generate next four frames
-				reward = np.zeros((par['batch_size'], 1))
-				done = np.zeros((par['batch_size'], 1))
-				for _ in range(par['k_skip']):
-					new_obs, reward_frame, done_frame = environment.agent_action(action)
-					reward += np.reshape(reward_frame,(-1,1))
-					done += done_frame
-					reward_list.append(reward)
+			done = np.minimum(1., done)
+			if len(reward_list) >= 1000:
+				reward_list = reward_list[1:]
 
-				done = np.minimum(1., done)
-				if len(reward_list) >= 1000:
-					reward_list = reward_list[1:]
+			# calculate the value function of the next four frames
+			future_val = sess.run(model.val, feed_dict = {x : new_obs, d : duty})
 
-				# calculate the value function of the next four frames
-				future_val = sess.run(model.val, feed_dict = {x : new_obs, d : duty})
+			# train the model
+			sess.run([model.train], feed_dict = {x : obs, d : duty, a: action, \
+				r : reward, f: future_val, ts: done})
 
-				# train the model
-				sess.run([model.train], feed_dict = {x : obs, d : duty, a: action, \
-					r : reward, f: future_val, ts: done})
-
-				obs = new_obs
-				if t%200==0:
-					W_pos, W_neg, W_trace_pos, W_trace_neg = \
-						sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
-					display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, \
-						reward, reward_list, y, i, t)
+			obs = new_obs
+			if t%200==0:
+				W_pos, W_neg, W_trace_pos, W_trace_neg = \
+					sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
+				display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, \
+					reward, reward_list, y, i, t)
 
 
 

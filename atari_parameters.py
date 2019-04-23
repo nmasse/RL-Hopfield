@@ -49,10 +49,6 @@ par = {
 	'discount_rate'			: 0.99,
 
 	# Task specs
-	'num_time_steps'		: 1,
-	'num_batches'			: 10000000,
-
-	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
 	'task'					: 'atari',
 	'frames_per_iter'		: 2500000000,
@@ -77,7 +73,7 @@ par = {
 	'n_stride'				: [4,2,2], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 512,
+	'batch_size'			: 8,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 
