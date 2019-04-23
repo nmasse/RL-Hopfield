@@ -18,6 +18,7 @@ import atari_stimulus as stimulus
 from atari_parameters import par
 import atari_encoder as ae
 import striatum
+import time
 
 # Match GPU IDs to nvidia-smi command
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
@@ -70,8 +71,8 @@ class Model:
 		self.binary = tf.where(boost_cond, tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
 		self.latent = tf.where(boost_cond, self.latent, tf.zeros(self.latent.shape))
 
-		self.y, self.update_traces, self.update_weights, \
-			self.normalize_weights = self.striatum.run(self.latent, self.reward)
+		#self.y, self.update_traces, self.update_weights, \
+		#	self.normalize_weights = self.striatum.run(self.latent, self.action, self.reward)
 		#z = dense_layer(y, par['n_out'], 'out')
 		z = dense_layer(tf.concat([0.*self.y, self.latent], axis = 1), par['n_out'], 'out')
 		z = tf.layers.dropout(z, rate = par['drop_rate'], training = True)
@@ -99,7 +100,7 @@ class Model:
 		# Make optimizer
 		opt = tf.train.AdamOptimizer(par['learning_rate'])
 
-		pred_val = self.reward + par['discount_rate']*self.val*(1-self.terminal_state)
+		pred_val = self.reward + par['discount_rate']*self.val*(1. - self.terminal_state)
 		advantage = pred_val - self.future_val
 
 		pol_loss = -tf.reduce_mean(advantage*self.action*tf.log(self.pol + epsilon))
@@ -127,6 +128,16 @@ def main(gpu_id=None):
 
 	# Initialize stimulus environment
 	environment = stimulus.Stimulus()
+
+	t0 = time.time()
+	obs = environment.reset_environments()
+	print('reset_environments', time.time() - t0)
+
+	action = np.array(np.stack([np.random.multinomial(1, [0.25,0.25,0.25,0.25]) for i in range(par['batch_size'])]))
+	t0 = time.time()
+	new_obs, reward_frame, done_frame = environment.agent_action(action)
+	print('action', time.time() - t0)
+	1/0
 
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
@@ -159,7 +170,9 @@ def main(gpu_id=None):
 		for i in range(par['num_batches']):
 
 			reward_list = []
+			t0 = time.time()
 			obs = environment.reset_environments()
+			print('Time', time.time() - t0)
 
 			for t in range(par['frames_per_iter']):
 
@@ -182,8 +195,9 @@ def main(gpu_id=None):
 				for _ in range(par['k_skip']):
 					new_obs, reward_frame, done_frame = environment.agent_action(action)
 					reward += np.reshape(reward_frame,(-1,1))
-					done += done_frame
+					done += np.reshape(done_frame,(-1,1))
 					reward_list.append(reward)
+
 
 				done = np.minimum(1., done)
 				if len(reward_list) >= 1000:

@@ -44,7 +44,7 @@ par = {
 	'trace_decay'			: 0.8,
 
 	# Timings and rates
-	'learning_rate'			: 1e-5,
+	'learning_rate'			: 1e-6,
 	'drop_rate'				: 0.,
 	'discount_rate'			: 0.99,
 
@@ -77,7 +77,7 @@ par = {
 	'n_stride'				: [4,2,2], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 512,
+	'batch_size'			: 128,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 
