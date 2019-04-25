@@ -10,7 +10,10 @@ class Stimulus:
 	def __init__(self):
 
 		self.envs = [gym.make(par['gym_env']) for _ in range(par['batch_size'])]
-		
+		print('Game:', par['gym_env'])
+		print('Game action space:', self.envs[0].action_space)
+		print('Actions:', self.envs[0].unwrapped.get_action_meanings(), '\n')
+
 
 	def preprocess(self, frame_list):
 
@@ -85,11 +88,18 @@ class Stimulus:
 		# Update and obtain framebuffer
 		obs = self.update_framebuffer(obs)
 
-		# Clarify reward structure (may apply np.sign in the future)
+		# Clarify reward structure
 		reward = np.array(reward).astype(np.float32)
 
+		# Clarify done vector structure
+		done = np.array(done)
+
+		# Reshape rewards and termination vector
+		reward = reward.reshape(-1,1)
+		done = done.reshape(-1,1)
+		
 		# Return observation and reward as float32 arrays
-		return obs, reward, done # reward is unmodified
+		return obs, reward, done
 
 
 
@@ -102,14 +112,16 @@ if __name__ == '__main__':
 	print('Stimulus loaded and reset.')
 
 	t0 = time.time()
-	for i in range(4000):
+	rew_hist = []
+	for i in range(1000):
 		act = np.random.rand(par['batch_size'], 6)
 		s.envs[0].render()
 		o, r, d = s.agent_action(act)
-		print(i, d)
-		if d[0] == True:
-			time.sleep(1)
+		print(i)
+		rew_hist.append(r)
+
 	print(time.time() - t0)
+	print(np.mean(rew_hist))
 
 	# for i in range(10):
 	# 	plt.imshow(np.mean(o[i,...], axis=-1), aspect='auto', cmap='gray')

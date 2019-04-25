@@ -18,7 +18,7 @@ par = {
 	# Network shape
 	'n_hidden'				: [200, 200],
 	'n_encoding'			: [64, 128],
-	'n_pol'					: 4,
+	'n_pol'					: 6,
 	'n_val'					: 1,
 	'n_latent'				: 1024,
 	'n_dend'				: 25,
@@ -44,7 +44,7 @@ par = {
 	'trace_decay'			: 0.8,
 
 	# Timings and rates
-	'learning_rate'			: 1e-5,
+	'learning_rate'			: (1/1000)*5e-4,
 	'drop_rate'				: 0.,
 	'discount_rate'			: 0.99,
 
@@ -63,7 +63,7 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.01,
+	'entropy_cost'          : 0.001,
 	'val_cost'              : 0.01,
 	'latent_cost'			: 0.00000,
 
@@ -73,7 +73,7 @@ par = {
 	'n_stride'				: [4,2,2], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 8,
+	'batch_size'			: 128,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 
