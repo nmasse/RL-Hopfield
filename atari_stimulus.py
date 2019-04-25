@@ -3,6 +3,7 @@ from scipy.misc import imresize
 from collections import deque
 import gym
 from atari_parameters import par
+import time
 
 
 class Stimulus:
@@ -14,22 +15,64 @@ class Stimulus:
 		print('Game action space:', self.envs[0].action_space)
 		print('Actions:', self.envs[0].unwrapped.get_action_meanings(), '\n')
 
+		self.cached_nn = False
+		
+
+	def nn_interpolate(self, x, new_size):
+
+		# Assumes x is of shape [batch x pix_x x pix_y x RGB]
+		# Assumes new_size is list/tuple [new_size_x, new_size_y]
+
+		# Checks whether the interpolation algorithm has already been run
+		# If so, skips straight to the downsampling step
+		# If not, calculates the indices to do nearest-neighbor downsampling
+		if not self.cached_nn:
+
+			# Get the size of the source image
+			old_size = x.shape[1:3]
+
+			# Set up index collecting
+			idx = []
+
+			# Iterate over the dimensions of the image
+			for d in range(len(old_size)):
+
+				# Find the ratio between the old and new sizes for this dimension
+				r = new_size[d]/old_size[d]
+
+				# Determine the nearest-neighbor indices for each of the new pixels
+				inds = np.ceil(np.arange(1, 1+new_size[d])/r - 1).astype(int)
+
+				# Record this set of indices
+				idx.append(inds)
+
+			# Aggregate the indices into a grid for easy indexing
+			self.nn_ind_set = np.meshgrid(*idx, sparse=False, indexing='ij')
+			
+			# Declare the interpolation indexing as complete and raise the
+			# flag to retrieve the cached result next time
+			self.cached_nn = True
+
+		# Index into the source image to generate the interpolated image
+		return x[:,self.nn_ind_set[0],self.nn_ind_set[1],:]
+
 
 	def preprocess(self, frame_list):
 
-		# Downsample frames to 100 x 84
-		frames = [imresize(f, (100, 84, 3)) for f in frame_list]
-
 		# Combine batch of frames into an array
-		frames = np.stack(frames, axis=0).astype(np.float32)
+		frames = np.stack(frame_list, axis=0)
 
-		# Convert values to a range of 0 to 1
-		frames = frames/255
+		# Downsample frames to 100 x 84
+		frames = self.nn_interpolate(frames, [100, 84])
 
-		# Convert to grayscale (luminosity method)
-		frames = 0.21*frames[...,0] + 0.72*frames[...,1] + 0.07*frames[...,2]
+		# Simultaneously convert to grayscale (luminosity method)
+		# and convert integer color values to a range of 0 to 1
+		frames = (0.21/255)*frames[...,0] \
+			+ (0.72/255)*frames[...,1] \
+			+ (0.07/255)*frames[...,2]
 
-		return frames
+		# Return preprocessed frames, converted to float32
+		return frames.astype(np.float32)
 
 
 	def update_framebuffer(self, update, initialize=False):
@@ -96,6 +139,7 @@ class Stimulus:
 		done = np.array(done)
 
 		# Reshape rewards and termination vector
+		reward_sign = reward_sign.reshape(-1,1)
 		reward = reward.reshape(-1,1)
 		done = done.reshape(-1,1)
 		
@@ -113,22 +157,22 @@ if __name__ == '__main__':
 	print('Stimulus loaded and reset.')
 
 	t0 = time.time()
-	rew_hist = []
-	high_score = np.zeros([par['batch_size'], 1])
+	# rew_hist = []
+	# high_score = np.zeros([par['batch_size'], 1])
 	for i in range(1000):
 		act = np.random.rand(par['batch_size'], 6)
-		s.envs[0].render()
+		# s.envs[0].render()
 		o, r, rs, d = s.agent_action(act)
 
-		high_score += r
-		high_score *= (1-d)
+		# high_score += r
+		# high_score *= (1-d)
 
-		print(i, np.squeeze(high_score).astype(np.int32))
-		rew_hist.append(r)
-		time.sleep(0.1)
+		# print(i, np.squeeze(high_score).astype(np.int32))
+		# rew_hist.append(r)
+		# time.sleep(0.1)
 
-	print(time.time() - t0)
-	print(np.mean(rew_hist))
+	print('Elapsed:', time.time() - t0)
+	# print(np.mean(rew_hist))
 
 	# for i in range(10):
 	# 	plt.imshow(np.mean(o[i,...], axis=-1), aspect='auto', cmap='gray')
