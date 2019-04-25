@@ -45,7 +45,7 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 
 class Model:
 
-	def __init__(self, stim, reward, action, future_val, terminal_state, gate):
+	def __init__(self, stim, reward, action, future_val, terminal_state, gate, step):
 
 		# Gather placeholders
 		self.stim = stim
@@ -54,13 +54,14 @@ class Model:
 		self.future_val = future_val
 		self.terminal_state = terminal_state
 		self.gate = gate
+		self.step = step
 
 		#self.striatum = striatum.Network()
 
 		# Run encoder
 		flat, conv_shapes = ae.encoder(self.stim, par['n_latent'], \
 			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
-		z = dense_layer(flat, par['n_out'], 'out')
+		z = dense_layer(flat, par['n_latent'], 'out')
 		z = self.gate * z
 
 		self.pol = dense_layer(z, par['n_pol'], 'pol', activation = tf.identity)
@@ -83,9 +84,9 @@ class Model:
 		print()
 
 		# Make optimizer
-		opt = tf.train.AdamOptimizer(par['learning_rate'])
+		opt = AdamOpt.AdamOpt(var_list, learning_rate = par['learning_rate'])
 
-		pred_val = self.reward + (par['discount_rate']**par['n-step'])*self.future_val*(1. - self.terminal_state)
+		pred_val = self.reward + (par['discount_rate']**self.step)*self.future_val*(1. - self.terminal_state)
 		advantage = pred_val - self.val
 
 		pol_loss = -tf.reduce_mean(tf.stop_gradient(advantage)*self.action*tf.log(self.pol + epsilon))
@@ -96,7 +97,11 @@ class Model:
 
 		loss = pol_loss + par['val_cost'] * val_loss - par['entropy_cost'] * entropy_loss
 
-		self.train = opt.minimize(loss)
+		self.update_grads = opt.compute_gradients(loss, apply_gradients = False)
+
+		self.update_weights = opt.update_weights()
+
+
 
 
 def main(gpu_id=None):
@@ -123,6 +128,7 @@ def main(gpu_id=None):
 	f = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'future_val')
 	g = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'gate')
 	ts = tf.placeholder(tf.float32, [par['batch_size'], 1], 'terminal_state')
+	s = tf.placeholder(tf.float32, [], 'step')
 
 	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
@@ -130,7 +136,7 @@ def main(gpu_id=None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(x, r, a, f, ts, g)
+			model = Model(x, r, a, f, ts, g, s)
 		sess.run(tf.global_variables_initializer())
 
 
@@ -141,14 +147,15 @@ def main(gpu_id=None):
 		high_score        = np.zeros([par['batch_size'], 1])
 		agent_score       = np.zeros([par['batch_size'], 1])
 		final_agent_score = np.zeros([par['batch_size'], 1])
+		reward_list = []
+		obs_list = []
+		action_list = []
+		value_list = []
+		done_list = []
+
 		for fr in range(par['num_frames']//par['k_skip']):
 
 			if fr%200==0:
-				reward_list = []
-				obs_list = []
-				action_list = []
-				value_list = []
-				done_list = []
 				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
 					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 				#gate = np.ones_like(gate)
@@ -166,7 +173,8 @@ def main(gpu_id=None):
 			done   = np.zeros((par['batch_size'], 1))
 			for _ in range(par['k_skip']):
 				obs, reward_frame, reward_sign_frame, done_frame = environment.agent_action(action)
-				reward += reward_frame
+				#reward += reward_frame
+				reward += reward_sign_frame
 				done   += done_frame
 
 				# Update the score by adding the current reward
@@ -185,26 +193,30 @@ def main(gpu_id=None):
 			done_list.append( np.minimum(1., done))
 
 			if len(obs_list) == par['n-step']+1:
+				for n in range(par['n-step']):
 
-				reward = np.zeros((par['batch_size'], 1))
-				done = np.zeros((par['batch_size'], 1))
-				for k in range(par['n-step']):
-					done += done_list[k]
-					reward += reward_list[k]*par['discount_rate']**k
-				done = np.minimum(1., done)
+					reward = np.zeros((par['batch_size'], 1))
+					done = np.zeros((par['batch_size'], 1))
+					for k in range(n+1):
+						done += done_list[par['n-step']-k-1]
+						reward += reward_list[par['n-step']-k-1]*par['discount_rate']**(n-k)
+					done = np.minimum(1., done)
 
-				# train the model
-				sess.run([model.train], feed_dict = {x : obs_list[0], a: action_list[0], \
-					r : reward, f: val, ts: done, g:gate})
+					# train the model
+					sess.run(model.update_grads, feed_dict = {x : obs_list[-2-n], \
+						a: action_list[-2-n], r : reward, f: val, ts: done, g:gate, s:n+1})
 
-				obs_list = obs_list[1:]
-				action_list = action_list[1:]
-				reward_list = reward_list[1:]
-				done_list = done_list[1:]
+				sess.run(model.update_weights)
+
+				obs_list = []
+				action_list = []
+				reward_list = []
+				done_list = []
+
 
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
-			if fr%200==0:
+			if fr%100==0:
 				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
 					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
 
