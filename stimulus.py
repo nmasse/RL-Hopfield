@@ -48,6 +48,7 @@ class Stimulus:
 		rew_locs = []
 		for i in range(len(par['rewards'])):
 			rew_loc = [int(inds[i]//par['room_width']), int(inds[i]%par['room_width'])]
+			rew_loc = [5,2]
 			rew_locs.append(tuple(rew_loc))
 
 		return rew_locs
@@ -78,6 +79,7 @@ class Stimulus:
 
 	def identify_reward(self, location, agent_id):
 
+		#print('ID', location, self.reward_locations[agent_id], tuple(location) in self.reward_locations[agent_id])
 		if tuple(location) in self.reward_locations[agent_id]:
 			reward_index = self.reward_locations[agent_id].index(tuple(location))
 			return self.rewards[reward_index], par['reward_vectors'][reward_index,:]
@@ -139,6 +141,7 @@ class Stimulus:
 				if rew is not None:
 					reward[i] = rew
 
+		self.reset_agents(reward > 0)
 		return reward[:, np.newaxis]
 
 
