@@ -138,7 +138,8 @@ def main(gpu_id=None):
 		print('Starting training.\n')
 		reward_list_full = []
 
-
+		high_score  = np.zeros([par['batch_size'], 1])
+		agent_score = np.zeros([par['batch_size'], 1])
 		for fr in range(par['num_frames']//par['k_skip']):
 
 			if fr%200==0:
@@ -161,11 +162,20 @@ def main(gpu_id=None):
 
 			# Generate next four frames
 			reward = np.zeros((par['batch_size'], 1))
-			done = np.zeros((par['batch_size'], 1))
+			done   = np.zeros((par['batch_size'], 1))
 			for _ in range(par['k_skip']):
-				obs, reward_frame, done_frame = environment.agent_action(action)
-				reward += np.reshape(reward_frame, (-1,1))
-				done += np.reshape(done_frame, (-1,1))
+				obs, reward_frame, reward_sign_frame, done_frame = environment.agent_action(action)
+				reward += reward_frame
+				done   += done_frame
+
+				# Update the score by adding the current reward, and
+				# zero out the score for that agent if its environment resets
+				agent_score += reward_frame
+				agent_score *= (1-done_frame)
+
+				# Record overall high scores for each agent
+				high_score = np.maximum(high_score, agent_score)
+
 			reward_list.append(reward)
 			reward_list_full.append(reward)
 			done_list.append( np.minimum(1., done))
@@ -191,9 +201,9 @@ def main(gpu_id=None):
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
 			if fr%200==0:
-				print('Frame ',fr, 'Policy',np.mean(pol,axis=0),'Reward', np.mean(reward_list_full))
-
-
+				print('Frame {:>7} |'.format(fr), 'Policy', np.mean(pol,axis=0), 'Reward', np.mean(reward_list_full))
+				print(' '*14 + '| Overall High Score: {:>4} | Current High Score: {:>4}'.format(\
+					int(high_score.max()), int(agent_score.max())))
 
 
 def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):

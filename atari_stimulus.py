@@ -90,6 +90,7 @@ class Stimulus:
 
 		# Clarify reward structure
 		reward = np.array(reward).astype(np.float32)
+		reward_sign = np.sign(reward)
 
 		# Clarify done vector structure
 		done = np.array(done)
@@ -99,7 +100,7 @@ class Stimulus:
 		done = done.reshape(-1,1)
 		
 		# Return observation and reward as float32 arrays
-		return obs, reward, done
+		return obs, reward, reward_sign, done
 
 
 
@@ -113,12 +114,18 @@ if __name__ == '__main__':
 
 	t0 = time.time()
 	rew_hist = []
+	high_score = np.zeros([par['batch_size'], 1])
 	for i in range(1000):
 		act = np.random.rand(par['batch_size'], 6)
 		s.envs[0].render()
-		o, r, d = s.agent_action(act)
-		print(i)
+		o, r, rs, d = s.agent_action(act)
+
+		high_score += r
+		high_score *= (1-d)
+
+		print(i, np.squeeze(high_score).astype(np.int32))
 		rew_hist.append(r)
+		time.sleep(0.1)
 
 	print(time.time() - t0)
 	print(np.mean(rew_hist))
