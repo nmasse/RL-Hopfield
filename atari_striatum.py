@@ -108,8 +108,8 @@ def main(gpu_id=None):
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
 	# Reduce memory consumption for GPU 0
-	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8) \
-		if gpu_id == '3' else tf.GPUOptions()
+	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)# \
+#		if gpu_id == '3' else tf.GPUOptions()
 
 	# Initialize stimulus environment and obtain first observations
 	environment = stimulus.Stimulus()
@@ -138,8 +138,9 @@ def main(gpu_id=None):
 		print('Starting training.\n')
 		reward_list_full = []
 
-		high_score  = np.zeros([par['batch_size'], 1])
-		agent_score = np.zeros([par['batch_size'], 1])
+		high_score        = np.zeros([par['batch_size'], 1])
+		agent_score       = np.zeros([par['batch_size'], 1])
+		final_agent_score = np.zeros([par['batch_size'], 1])
 		for fr in range(par['num_frames']//par['k_skip']):
 
 			if fr%200==0:
@@ -168,9 +169,12 @@ def main(gpu_id=None):
 				reward += reward_frame
 				done   += done_frame
 
-				# Update the score by adding the current reward, and
-				# zero out the score for that agent if its environment resets
+				# Update the score by adding the current reward
 				agent_score += reward_frame
+
+				# Update final agent score and zero out agent score if the
+				# environment resets
+				final_agent_score = final_agent_score*(1-done_frame) + agent_score*done_frame
 				agent_score *= (1-done_frame)
 
 				# Record overall high scores for each agent
@@ -201,9 +205,8 @@ def main(gpu_id=None):
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
 			if fr%200==0:
-				print('Frame {:>7} |'.format(fr), 'Policy', np.mean(pol,axis=0), 'Reward', np.mean(reward_list_full))
-				print(' '*14 + '| Overall High Score: {:>4} | Current High Score: {:>4}'.format(\
-					int(high_score.max()), int(agent_score.max())))
+				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
+					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
 
 
 def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):
