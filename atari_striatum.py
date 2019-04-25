@@ -45,11 +45,10 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 
 class Model:
 
-	def __init__(self, stim, boost_d, reward, action, future_val, terminal_state, gate):
+	def __init__(self, stim, reward, action, future_val, terminal_state, gate):
 
 		# Gather placeholders
 		self.stim = stim
-		self.boost_d = boost_d
 		self.reward = reward
 		self.action = action
 		self.future_val = future_val
@@ -59,29 +58,14 @@ class Model:
 		#self.striatum = striatum.Network()
 
 		# Run encoder
-		self.latent, conv_shapes = ae.encoder(self.stim, par['n_latent'], \
+		flat, conv_shapes = ae.encoder(self.stim, par['n_latent'], \
 			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
-
-		# Calculate post-boost top_k
-		boosted_latent = self.latent * \
-			tf.exp(par['boost_level']*(par['num_k']/par['n_latent'] - self.boost_d))
-		top_k, _ = tf.nn.top_k(boosted_latent, k=par['num_k'])
-
-		# Filter the latent encoding
-		boost_cond = boosted_latent >= top_k[:,par['num_k']-1:par['num_k']]
-		self.binary = tf.where(boost_cond, tf.ones(self.latent.shape), tf.zeros(self.latent.shape))
-		self.latent = tf.where(boost_cond, self.latent, tf.zeros(self.latent.shape))
-
-		#self.y, self.update_traces, self.update_weights, \
-		#	self.normalize_weights = self.striatum.run(self.latent, self.action, self.reward)
-		#z = dense_layer(y, par['n_out'], 'out')
-		z = dense_layer(tf.concat([self.latent], axis = 1), par['n_out'], 'out')
+		z = dense_layer(flat, par['n_out'], 'out')
 		z = self.gate * z
+
 		self.pol = dense_layer(z, par['n_pol'], 'pol', activation = tf.identity)
 		self.pol = tf.nn.softmax(self.pol, axis = 1)
 		self.val = dense_layer(z, par['n_val'], 'val', activation = tf.identity)
-
-		#self.W_pos, self.W_neg, self.W_trace_pos, self.W_trace_neg = self.striatum.return_weights()
 
 		# Run optimizer
 		self.optimize()
@@ -101,7 +85,7 @@ class Model:
 		# Make optimizer
 		opt = tf.train.AdamOptimizer(par['learning_rate'])
 
-		pred_val = self.reward + (par['discount_rate']**4)*self.future_val*(1. - self.terminal_state)
+		pred_val = self.reward + (par['discount_rate']**par['n-step'])*self.future_val*(1. - self.terminal_state)
 		advantage = pred_val - self.val
 
 		pol_loss = -tf.reduce_mean(tf.stop_gradient(advantage)*self.action*tf.log(self.pol + epsilon))
@@ -134,7 +118,6 @@ def main(gpu_id=None):
 	# Reset graph and designate placeholders
 	tf.reset_default_graph()
 	x = tf.placeholder(tf.float32, [par['batch_size'], 100, 84, 4], 'input')
-	d = tf.placeholder(tf.float32, [1, par['n_latent']], 'boost_d')
 	r = tf.placeholder(tf.float32, [par['batch_size'], 1], 'reward')
 	a = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
 	f = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'future_val')
@@ -147,20 +130,12 @@ def main(gpu_id=None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(x, d, r, a, f, ts, g)
+			model = Model(x, r, a, f, ts, g)
 		sess.run(tf.global_variables_initializer())
 
-		# Make lists for recording model performance
-		recon_loss_record  = []
-		latent_loss_record = []
 
 		# Start training loop
 		print('Starting training.\n')
-		duty = (par['num_k']/par['n_latent'])*np.ones([1, par['n_latent']]).astype(np.float32)
-		reward = np.zeros([par['batch_size'], 1], np.float32)
-		#val = np.zeros([par['batch_size'], 1], np.float32)
-
-
 		reward_list_full = []
 
 
@@ -172,23 +147,17 @@ def main(gpu_id=None):
 				action_list = []
 				value_list = []
 				done_list = []
-				gate = np.random.choice([0. , 1/0.8], size = [par['batch_size'], par['n_latent']], p=[0.2, 0.8])
+				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
+					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 				#gate = np.ones_like(gate)
 
 			# Run the model
-			pol, val, binary = sess.run([model.pol, model.val, model.binary], \
-				feed_dict = {x : obs, d : duty, r : reward, g:gate})
-
-			# Update boost duty cycle calculation
-			duty = (1-par['boost_alpha']) * duty  \
-				+ par['boost_alpha'] * np.mean(binary, axis = 0, keepdims = True)
+			pol, val = sess.run([model.pol, model.val], feed_dict = {x : obs, g:gate})
+			obs_list.append(obs)
 
 			# choose action, determine reward
-			#print('pol', pol.shape)
 			action = np.array(np.stack([np.random.multinomial(1, pol[i,:]-1e-6) for i in range(par['batch_size'])]))
 			action_list.append(action)
-			obs_list.append(obs)
-			value_list.append(val)
 
 			# Generate next four frames
 			reward = np.zeros((par['batch_size'], 1))
@@ -201,35 +170,29 @@ def main(gpu_id=None):
 			reward_list_full.append(reward)
 			done_list.append( np.minimum(1., done))
 
-			if len(reward_list_full) >= 1000:
-				reward_list_full = reward_list_full[1:]
-
-			if len(obs_list) == 5:
+			if len(obs_list) == par['n-step']+1:
 
 				reward = np.zeros((par['batch_size'], 1))
 				done = np.zeros((par['batch_size'], 1))
-				for k in range(4):
+				for k in range(par['n-step']):
 					done += done_list[k]
 					reward += reward_list[k]*par['discount_rate']**k
 				done = np.minimum(1., done)
 
 				# train the model
-				sess.run([model.train], feed_dict = {x : obs_list[0], d : duty, a: action_list[0], \
-					r : reward, f: value_list[4], ts: done, g:gate})
+				sess.run([model.train], feed_dict = {x : obs_list[0], a: action_list[0], \
+					r : reward, f: val, ts: done, g:gate})
 
 				obs_list = obs_list[1:]
 				action_list = action_list[1:]
-				value_list = value_list[1:]
 				reward_list = reward_list[1:]
 				done_list = done_list[1:]
 
-
+			if len(reward_list_full) >= 1000:
+				reward_list_full = reward_list_full[1:]
 			if fr%200==0:
 				print('Frame ',fr, 'Policy',np.mean(pol,axis=0),'Reward', np.mean(reward_list_full))
-				#W_pos, W_neg, W_trace_pos, W_trace_neg = \
-				#	sess.run([model.W_pos, model.W_neg, model.W_trace_pos, model.W_trace_neg])
-				#display_data(obs, 0., 0., 0., 0., pol, \
-				#	reward, reward_list, 0., fr)
+
 
 
 
@@ -275,7 +238,7 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 def print_key_params():
 
 	key_params = ['savefn', 'striatum_th', 'trace_th', 'learning_rate', 'discount_rate',\
-		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size']
+		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n-step']
 	print('Key parameters...')
 	for k in key_params:
 		print(k, ': ', par[k])

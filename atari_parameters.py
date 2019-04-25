@@ -21,7 +21,7 @@ par = {
 	'n_pol'					: 6,
 	'n_val'					: 1,
 	'n_latent'				: 1024,
-	'n_dend'				: 25,
+	'n_flat'				: 7*6*64,
 	'act_mult'				: 4,
 	'dend_th'				: 8,
 
@@ -45,8 +45,9 @@ par = {
 
 	# Timings and rates
 	'learning_rate'			: 1e-6,
-	'drop_rate'				: 0.,
+	'drop_rate'				: 0.2,
 	'discount_rate'			: 0.99,
+	'n-step'				: 4,
 
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
@@ -63,7 +64,7 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.001,
+	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.01,
 	'latent_cost'			: 0.00000,
 
