@@ -130,14 +130,14 @@ def encoder(data0, n_latent, var_dict=None, trainable=True):
 
 		# Flatten convolution output, apply dense layers to make latent vector
 		flat0  = tf.reshape(conv3, [batch_size, -1])
-		dense0 = dense_layer(flat0,  n_out=2048,     name='dense0',  var_dict=vd, trainable=True)
-		dense1 = dense_layer(dense0, n_out=2048,     name='dense1',  var_dict=vd, trainable=True)
-		latent = dense_layer(dense1, n_out=n_latent, name='latent0', var_dict=vd, trainable=True, activation=tf.identity)
+		# dense0 = dense_layer(flat0,  n_out=2048,     name='dense0',  var_dict=vd, trainable=True)
+		# dense1 = dense_layer(dense0, n_out=2048,     name='dense1',  var_dict=vd, trainable=True)
+		# latent = dense_layer(dense1, n_out=n_latent, name='latent0', var_dict=vd, trainable=True, activation=tf.identity)
 
 	# Collect the convolutional shapes for later decovolution
 	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2, conv3]]
 
-	return latent, conv_shapes
+	return flat0, conv_shapes
 
 
 def decoder(latent, conv_shapes, var_dict=None, trainable=True):
