@@ -273,7 +273,7 @@ def main(gpu_id=None):
 				render_fr_count = 1
 				while np.any(render_done == 0.):
 
-					render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:gate})
+					render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:np.ones_like(gate)})
 					render_action = np.array(np.stack([np.random.multinomial(1, render_pol[i,:]-1e-6) for i in range(par['batch_size'])]))
 					
 					for _ in range(par['k_skip']):
