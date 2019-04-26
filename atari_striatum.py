@@ -94,8 +94,8 @@ class Model:
 
 		val_loss = tf.reduce_mean(tf.square(advantage))
 
-		#entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol*tf.log(self.pol + epsilon), axis = 1))
-		entropy_loss = -tf.reduce_mean(tf.reduce_mean(self.pol*tf.log(self.pol + epsilon), axis = 1))
+		entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol*tf.log(self.pol + epsilon), axis = 1))
+		#entropy_loss = -tf.reduce_mean(tf.reduce_mean(self.pol*tf.log(self.pol + epsilon), axis = 1))
 
 		loss = pol_loss + par['val_cost'] * val_loss - par['entropy_cost'] * entropy_loss
 
@@ -163,17 +163,6 @@ def main(gpu_id=None):
 			lr_multiplier = np.maximum(0.001, 0.99995**fr) # 999995
 			lr_multiplier = 1.
 
-			if fr%par['gate_reset']==0:
-				pass
-				# obs_list = []
-				# action_list = []
-				# reward_list = []
-				# done_list = []
-				#sess.run(model.update_weights)
-				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
-					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
-				#gate = np.ones_like(gate)
-
 			# Run the model
 			pol, val = sess.run([model.pol, model.val], feed_dict = {x : obs, g:gate})
 			obs_list.append(obs)
@@ -206,14 +195,14 @@ def main(gpu_id=None):
 			reward_list_full.append(reward)
 			done_list.append( np.minimum(1., done))
 
-			if len(obs_list) == par['n-step']+1:
-
-				for t0 in range(par['n-step'] - 1):
+			if len(obs_list) >= par['n_step']+1:
+				for t0 in range(par['n_step']):
 					reward = np.zeros((par['batch_size'], 1))
 					done = np.zeros((par['batch_size'], 1))
-					for t1 in range(t0, par['n-step']):
+					for t1 in range(t0, par['n_step']):
 						done += done_list[t1]
 						reward += reward_list[t1]*par['discount_rate']**(t1-t0)
+						#print(t0, t1, len(obs_list))
 					done = np.minimum(1., done)
 
 					# train the model
@@ -221,19 +210,19 @@ def main(gpu_id=None):
 						a: action_list[t0], r : reward, f: val, ts: done, g:gate, \
 						s:t1-t0+1, lr: lr_multiplier})
 
+				obs_list = obs_list[1:]
+				action_list = action_list[1:]
+				reward_list = reward_list[1:]
+				done_list = done_list[1:]
+
+			if fr%par['n_step'] == 0 and fr >= par['n_step']+1:
 				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
-				#gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
-				#	par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 
-				obs_list = obs_list[-1:0]
-				action_list = action_list[-1:0]
-				reward_list = reward_list[-1:0]
-				done_list = done_list[-1:0]
+			if fr%par['gate_reset']==0 and fr>0:
+				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
+					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
+				#gate = np.ones_like(gate)
 
-				# obs_list = []
-				# action_list = []
-				# reward_list = []
-				# done_list = []
 
 
 			if len(reward_list_full) >= 1000:
@@ -241,9 +230,84 @@ def main(gpu_id=None):
 			if fr%1000==0:
 				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
 					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
-			if fr%50000==0:
 				weights = sess.run(model.var_dict)
-				pickle.dump(weights, open('./savedir/weights_batch32_drop0_iter1.pkl','wb'))
+				fn = './savedir/weights_batch{}_drop5{}_reset{}_iter0.pkl'.format(par['batch_size'], \
+					int(par['drop_rate']*10), par['gate_reset'])
+				pickle.dump(weights, open(fn,'wb'))
+
+			if fr%20000 == 0 and fr != 0:
+
+				obs_list = []
+				action_list = []
+				reward_list = []
+				done_list = []
+
+				N = 10
+				render_done       = np.zeros([par['batch_size'], N], dtype=np.float32)
+				render_reward     = np.zeros([par['batch_size'], N], dtype=np.float32)
+				render_best_score = np.zeros([par['batch_size'], N], dtype=np.float32)
+
+				for k in range(N):
+					render_fr_count = 1
+
+					if k == 0:
+						print('\nRendering video...')
+						dirname = environment.start_render(fr)
+					else:
+						environment.start_render(fr, render=False)
+
+					render_obs = environment.reset_environments()
+
+					while np.any(render_done[:,k] == 0.):
+
+						render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:np.ones_like(gate)})
+						render_action = np.array(np.stack([np.random.multinomial(1, render_pol[i,:]-1e-6) for i in range(par['batch_size'])]))
+
+						for _ in range(par['k_skip']):
+							render_fr_count += 1
+							render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(render_action)
+
+							render_reward_frame = np.squeeze(render_reward_frame)
+							render_done_frame = np.squeeze(render_done_frame)
+
+							# Update record states
+							render_reward[:,k] += render_reward_frame
+							render_done[:,k]   += render_done_frame
+
+							# Update high score
+							render_best_score[:,k] = np.maximum(render_best_score[:,k], render_reward[:,k])
+
+							# End environments as necessary
+							render_reward[:,k] *= (1-render_done_frame)
+
+						# Stop rendering if too many frames have elapsed
+						if render_fr_count > 50000:
+							break
+
+					if k == 0:
+						environment.stop_render()
+					else:
+						environment.stop_render(render=False)
+
+				render_mean_score = np.mean(render_best_score)
+				render_high_score = int(render_best_score.max())
+				render_best_agent = np.where(np.squeeze(render_best_score[:,0]==render_best_score[:,0].max()))[0]
+
+				line0 = 'Recorded at Training Frame {}'.format(fr)
+				line1 = 'High Score: {}       [Agent(s) {}]'.format(render_high_score, render_best_agent)
+				line2 = 'Mean Score: {}'.format(render_mean_score)
+				line3 = 'Agent ID / Personal Best'
+				lines = ['{:>8} / {}'.format(int(ag), int(bs)) for ag, bs \
+					in enumerate(np.squeeze(render_best_score[:,0]))]
+
+				text = [line0, line1, line2, line3] + lines
+				text = '\n'.join(text)
+				with open(dirname+'performance_record.txt', 'w') as tfile:
+					tfile.write(text)
+
+				print('Rendered {} frames with a high score of {} (mean {}).'.format(\
+					render_fr_count, render_high_score, render_mean_score))
+				print('Rendering complete.\n')
 
 def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):
 
@@ -287,7 +351,7 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 def print_key_params():
 
 	key_params = ['savefn', 'striatum_th', 'trace_th', 'learning_rate', 'discount_rate',\
-		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n-step','gate_reset']
+		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n_step','gate_reset']
 	print('Key parameters...')
 	for k in key_params:
 		print(k, ': ', par[k])
