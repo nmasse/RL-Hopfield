@@ -19,7 +19,7 @@ def filter_init(size):
 	""" Using the given size, make the initialization
 		for a filter variable """
 
-	return tf.random_uniform(size, -0.1, 0.1)
+	return tf.random_uniform(size, -0.01, 0.01)
 
 
 def dense_layer(x, n_out, name, activation=tf.nn.relu, var_dict=None, trainable=True):
@@ -57,15 +57,17 @@ def conv_layer(x, n_filter, n_kernel, stride, name, activation=tf.nn.relu, var_d
 	# Make convolutional filter variable either by creating a new one or
 	# using a variable provided through var_dict
 	if var_dict is None:
-		f = tf.get_variable(name, trainable=trainable, \
-			initializer=filter_init([n_kernel, n_kernel, in_channels, n_filter]))
+		#f = tf.get_variable(name, trainable=trainable, \
+		#	initializer=filter_init([n_kernel, n_kernel, in_channels, n_filter]))
+		f = tf.get_variable(name, trainable=trainable, shape=[n_kernel, n_kernel, in_channels, n_filter], \
+			initializer=tf.contrib.layers.xavier_initializer())
 	else:
 		f = tf.get_variable(name, initializer=var_dict[name], trainable=trainable)
-	
+
 	# Generate convolution operation
 	strides = [1, stride, stride, 1]
 	y = activation(tf.nn.conv2d(x, f, strides, 'SAME'))
-	
+
 	return y
 
 
@@ -123,20 +125,16 @@ def encoder(data0, n_latent, var_dict=None, trainable=True):
 	with tf.variable_scope('encoder'):
 
 		# Run convolutional layers to compress input data
-		conv0  = conv_layer(data0, n_filter=32, n_kernel=2, stride=1, name='conv0', var_dict=vd, trainable=True)
-		conv1  = conv_layer(conv0, n_filter=32, n_kernel=8, stride=4, name='conv1', var_dict=vd, trainable=True)
-		conv2  = conv_layer(conv1, n_filter=64, n_kernel=4, stride=2, name='conv2', var_dict=vd, trainable=True)
-		conv3  = conv_layer(conv2, n_filter=64, n_kernel=4, stride=2, name='conv3', var_dict=vd, trainable=True)
-
+		conv0  = conv_layer(data0, n_filter=32, n_kernel=8, stride=4, name='conv1', var_dict=vd, trainable=True)
+		conv1  = conv_layer(conv0, n_filter=64, n_kernel=4, stride=2, name='conv2', var_dict=vd, trainable=True)
+		conv2  = conv_layer(conv1, n_filter=64, n_kernel=3, stride=1, name='conv3', var_dict=vd, trainable=True)
+		
 		# Flatten convolution output, apply dense layers to make latent vector
-		flat0  = tf.reshape(conv3, [batch_size, -1])
-		# dense0 = dense_layer(flat0,  n_out=2048,     name='dense0',  var_dict=vd, trainable=True)
-		# dense1 = dense_layer(dense0, n_out=2048,     name='dense1',  var_dict=vd, trainable=True)
-		# latent = dense_layer(dense1, n_out=n_latent, name='latent0', var_dict=vd, trainable=True, activation=tf.identity)
+		flat0  = tf.reshape(conv2, [batch_size, -1])
 
 	# Collect the convolutional shapes for later decovolution
-	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2, conv3]]
-
+	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2]]
+	print('conv_shapes', conv_shapes)
 	return flat0, conv_shapes
 
 
