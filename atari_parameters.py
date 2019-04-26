@@ -13,6 +13,7 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'plotdir'				: './plotdir/',
+	'savefn'				: 'ent005_steps100',
 	'RL_method'				: 'policy',
 
 	# Network shape
@@ -44,10 +45,10 @@ par = {
 	'trace_decay'			: 0.8,
 
 	# Timings and rates
-	'learning_rate'			: 1e-6,
+	'learning_rate'			: (1/100)*1e-3,
 	'drop_rate'				: 0.2,
 	'discount_rate'			: 0.99,
-	'n-step'				: 4,
+	'n_step'				: 5,
 
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
@@ -64,8 +65,8 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.01,
-	'val_cost'              : 0.01,
+	'entropy_cost'          : 0.005,
+	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
 
 
@@ -107,9 +108,6 @@ def load_encoder_weights():
 
 def update_dependencies():
 	""" Updates all parameter dependencies """
-
-
-	par['savefn'] = '{}boost_striatum_v1'.format(int(par['boost_level']))
 
 	par['num_k'] = int(par['n_latent'] * par['prop_top'])
 

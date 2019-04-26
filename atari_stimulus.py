@@ -10,13 +10,45 @@ class Stimulus:
 
 	def __init__(self):
 
-		self.envs = [gym.make(par['gym_env']) for _ in range(par['batch_size'])]
+		self.envs        = [gym.make(par['gym_env']) for _ in range(par['batch_size'])]
+		self.render_envs = [gym.make(par['gym_env']) for _ in range(par['batch_size'])]
+
 		print('Game:', par['gym_env'])
 		print('Game action space:', self.envs[0].action_space)
 		print('Actions:', self.envs[0].unwrapped.get_action_meanings(), '\n')
 
 		self.cached_nn = False
-		
+
+
+	def start_render(self, frame):
+		""" Push the standard environments into a backup, replace with
+			environments that can be rendered to file """
+
+		# Designate a directory name for this set of saves
+		d = './viddir/{}_fr{}_t{}/'.format(par['savefn'], frame, int(time.time()))
+
+		# Shunt training environments to the back burner
+		self.envs_backup  = self.envs
+		self.frmbf_backup = self.framebuffer
+
+		# Make a set of rendering environments
+		self.envs = [gym.wrappers.Monitor(env, d+'agent{}/'.format(i), force=True) \
+			for i, env in enumerate(self.render_envs)]
+
+		# Return directory name
+		return d
+
+	def stop_render(self):
+		""" Close the rendering environments and
+			reinvoke the training environments """
+
+		# Close the rendering environments
+		[env.close() for env in self.envs]
+
+		# Bring the training environments back into focus
+		self.envs = self.envs_backup
+		self.framebuffer = self.frmbf_backup
+
 
 	def nn_interpolate(self, x, new_size):
 
