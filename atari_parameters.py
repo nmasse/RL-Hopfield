@@ -20,7 +20,7 @@ par = {
 	'n_encoding'			: [64, 128],
 	'n_pol'					: 6,
 	'n_val'					: 1,
-	'n_latent'				: 1024,
+	'n_latent'				: 512,
 	'n_flat'				: 7*6*64,
 	'act_mult'				: 4,
 	'dend_th'				: 8,
@@ -40,19 +40,20 @@ par = {
 	'n_striatum'			: 2,
 	'striatum_th'			: 0.5, # was 0.5
 	'trace_th'				: 10., # was 10
-	'n_out'					: 1024,
+	'n_out'					: 512,
 	'trace_decay'			: 0.8,
 
 	# Timings and rates
-	'learning_rate'			: 1e-6,
-	'drop_rate'				: 0.2,
+	'learning_rate'			: 1e-4,
+	'drop_rate'				: 0.,
 	'discount_rate'			: 0.99,
-	'n-step'				: 4,
+	'n-step'				: 5,
+	'gate_reset'			: 500,
 
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
 	'task'					: 'atari',
-	'num_frames'			: 2500000000,
+	'num_frames'			: 25000000000,
 	'k_skip'				: 4,
 	'rewards'				: [-1.,1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
@@ -65,16 +66,16 @@ par = {
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
 	'entropy_cost'          : 0.01,
-	'val_cost'              : 0.01,
+	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
 
 
 	'n_filters'				: [32,64,64],
-	'n_kernels'				: [8,4,4], # originally 8,4,4
-	'n_stride'				: [4,2,2], # originally 4,2,2
+	'n_kernels'				: [8,4,3], # originally 8,4,4
+	'n_stride'				: [4,2,1], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 128,
+	'batch_size'			: 32,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 
