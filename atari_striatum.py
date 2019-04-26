@@ -219,6 +219,7 @@ def main(gpu_id=None):
 				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
 
 			if fr%par['gate_reset']==0 and fr>0:
+				#sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
 				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
 					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 				#gate = np.ones_like(gate)
