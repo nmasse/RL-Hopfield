@@ -46,10 +46,10 @@ par = {
 
 	# Timings and rates
 	'learning_rate'			: 1e-4,
-	'drop_rate'				: 0.,
+	'drop_rate'				: 0.5,
 	'discount_rate'			: 0.99,
-	'n-step'				: 5,
-	'gate_reset'			: 500,
+	'n_step'				: 5,
+	'gate_reset'			: 250,
 
 	# Task specs
 	'gym_env'				: 'SpaceInvaders-v0',
@@ -66,7 +66,7 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.005,
+	'entropy_cost'          : 0.001,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
 
