@@ -20,7 +20,7 @@ class Stimulus:
 		self.cached_nn = False
 
 
-	def start_render(self, frame):
+	def start_render(self, frame, render=True):
 		""" Push the standard environments into a backup, replace with
 			environments that can be rendered to file """
 
@@ -31,19 +31,23 @@ class Stimulus:
 		self.envs_backup  = self.envs
 		self.frmbf_backup = self.framebuffer
 
-		# Make a set of rendering environments
-		self.envs = [gym.wrappers.Monitor(env, d+'agent{}/'.format(i), force=True) \
-			for i, env in enumerate(self.render_envs)]
+		# Make a set of evaluation environments environments
+		if render:
+			self.envs = [gym.wrappers.Monitor(env, d+'agent{}/'.format(i), force=True) \
+				for i, env in enumerate(self.render_envs)]
+		else:
+			self.envs = self.render_envs
 
 		# Return directory name
 		return d
 
-	def stop_render(self):
+	def stop_render(self, render=True):
 		""" Close the rendering environments and
 			reinvoke the training environments """
 
 		# Close the rendering environments
-		[env.close() for env in self.envs]
+		if render:
+			[env.close() for env in self.envs]
 
 		# Bring the training environments back into focus
 		self.envs = self.envs_backup
