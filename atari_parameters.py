@@ -13,6 +13,7 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'plotdir'				: './plotdir/',
+	'savefn'				: 'ent005_steps100',
 	'RL_method'				: 'policy',
 
 	# Network shape
@@ -65,7 +66,7 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.01,
+	'entropy_cost'          : 0.005,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
 
@@ -108,9 +109,6 @@ def load_encoder_weights():
 
 def update_dependencies():
 	""" Updates all parameter dependencies """
-
-
-	par['savefn'] = '{}boost_striatum_v1'.format(int(par['boost_level']))
 
 	par['num_k'] = int(par['n_latent'] * par['prop_top'])
 
