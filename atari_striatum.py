@@ -45,7 +45,7 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 
 class Model:
 
-	def __init__(self, stim, reward, action, future_val, terminal_state, gate, step):
+	def __init__(self, stim, reward, action, future_val, terminal_state, gate, step, lr_multiplier):
 
 		# Gather placeholders
 		self.stim = stim
@@ -55,6 +55,7 @@ class Model:
 		self.terminal_state = terminal_state
 		self.gate = gate
 		self.step = step
+		self.lr_multiplier = lr_multiplier
 
 		#self.striatum = striatum.Network()
 
@@ -84,7 +85,7 @@ class Model:
 		print()
 
 		# Make optimizer
-		opt = AdamOpt.AdamOpt(var_list, learning_rate = par['learning_rate'])
+		opt = AdamOpt.AdamOpt(var_list, algorithm = 'rmsprop', learning_rate = par['learning_rate'])
 
 		pred_val = self.reward + (par['discount_rate']**self.step)*self.future_val*(1. - self.terminal_state)
 		advantage = pred_val - self.val
@@ -93,13 +94,14 @@ class Model:
 
 		val_loss = tf.reduce_mean(tf.square(advantage))
 
-		entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol*tf.log(self.pol + epsilon), axis = 1))
+		#entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol*tf.log(self.pol + epsilon), axis = 1))
+		entropy_loss = -tf.reduce_mean(tf.reduce_mean(self.pol*tf.log(self.pol + epsilon), axis = 1))
 
 		loss = pol_loss + par['val_cost'] * val_loss - par['entropy_cost'] * entropy_loss
 
-		self.update_grads = opt.compute_gradients(loss, apply_gradients = False)
+		self.update_grads = opt.compute_gradients_rmsprop(loss)
 
-		self.update_weights = opt.update_weights()
+		self.update_weights = opt.update_weights_rmsprop(lr_multiplier = self.lr_multiplier)
 
 
 
@@ -113,7 +115,7 @@ def main(gpu_id=None):
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
 	# Reduce memory consumption for GPU 0
-	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)# \
+	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.45)# \
 #		if gpu_id == '3' else tf.GPUOptions()
 
 	# Initialize stimulus environment and obtain first observations
@@ -129,6 +131,7 @@ def main(gpu_id=None):
 	g = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'gate')
 	ts = tf.placeholder(tf.float32, [par['batch_size'], 1], 'terminal_state')
 	s = tf.placeholder(tf.float32, [], 'step')
+	lr = tf.placeholder(tf.float32, [], 'step')
 
 	# Start TensorFlow session
 	with tf.Session(config = tf.ConfigProto(gpu_options = gpu_options)) as sess:
@@ -136,7 +139,7 @@ def main(gpu_id=None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(x, r, a, f, ts, g, s)
+			model = Model(x, r, a, f, ts, g, s, lr)
 		sess.run(tf.global_variables_initializer())
 
 
@@ -152,10 +155,21 @@ def main(gpu_id=None):
 		action_list = []
 		value_list = []
 		done_list = []
+		gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
+			par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 
 		for fr in range(par['num_frames']//par['k_skip']):
 
-			if fr%200==0:
+			lr_multiplier = np.maximum(0.001, 0.99995**fr) # 999995
+			lr_multiplier = 1.
+
+			if fr%par['gate_reset']==0:
+				pass
+				# obs_list = []
+				# action_list = []
+				# reward_list = []
+				# done_list = []
+				#sess.run(model.update_weights)
 				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
 					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 				#gate = np.ones_like(gate)
@@ -193,33 +207,43 @@ def main(gpu_id=None):
 			done_list.append( np.minimum(1., done))
 
 			if len(obs_list) == par['n-step']+1:
-				for n in range(par['n-step']):
 
+				for t0 in range(par['n-step'] - 1):
 					reward = np.zeros((par['batch_size'], 1))
 					done = np.zeros((par['batch_size'], 1))
-					for k in range(n+1):
-						done += done_list[par['n-step']-k-1]
-						reward += reward_list[par['n-step']-k-1]*par['discount_rate']**(n-k)
+					for t1 in range(t0, par['n-step']):
+						done += done_list[t1]
+						reward += reward_list[t1]*par['discount_rate']**(t1-t0)
 					done = np.minimum(1., done)
 
 					# train the model
-					sess.run(model.update_grads, feed_dict = {x : obs_list[-2-n], \
-						a: action_list[-2-n], r : reward, f: val, ts: done, g:gate, s:n+1})
+					sess.run(model.update_grads, feed_dict = {x : obs_list[t0], \
+						a: action_list[t0], r : reward, f: val, ts: done, g:gate, \
+						s:t1-t0+1, lr: lr_multiplier})
 
-				sess.run(model.update_weights)
+				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
+				#gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
+				#	par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 
-				obs_list = []
-				action_list = []
-				reward_list = []
-				done_list = []
+				obs_list = obs_list[-1:0]
+				action_list = action_list[-1:0]
+				reward_list = reward_list[-1:0]
+				done_list = done_list[-1:0]
+
+				# obs_list = []
+				# action_list = []
+				# reward_list = []
+				# done_list = []
 
 
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
-			if fr%100==0:
+			if fr%1000==0:
 				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
 					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
-
+			if fr%50000==0:
+				weights = sess.run(model.var_dict)
+				pickle.dump(weights, open('./savedir/weights_batch32_drop0_iter1.pkl','wb'))
 
 def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, reward_list, y, t):
 
@@ -263,7 +287,7 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 def print_key_params():
 
 	key_params = ['savefn', 'striatum_th', 'trace_th', 'learning_rate', 'discount_rate',\
-		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n-step']
+		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n-step','gate_reset']
 	print('Key parameters...')
 	for k in key_params:
 		print(k, ': ', par[k])
