@@ -45,7 +45,7 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 
 class Model:
 
-	def __init__(self, stim, gate, reward, action, future_val, terminal_state, step):
+	def __init__(self, stim, gate, reward, action, future_val, terminal_state, step, entropy_cost):
 
 		# Gather placeholders
 		self.stim = stim
@@ -55,6 +55,7 @@ class Model:
 		self.future_val = future_val
 		self.terminal_state = terminal_state
 		self.step = step
+		self.entropy_cost = entropy_cost
 
 		# Run encoder
 		self.latent, _ = ae.encoder(self.stim, par['n_latent'], \
@@ -101,7 +102,7 @@ class Model:
 		self.val_loss     =  tf.reduce_mean(tf.square(self.val - pred_val_static))
 		self.entropy_loss = -tf.reduce_mean(tf.reduce_sum(self.pol*tf.log(self.pol + epsilon), axis=1))
 
-		total_loss = self.pol_loss + par['val_cost'] * self.val_loss - par['entropy_cost'] * self.entropy_loss
+		total_loss = self.pol_loss + par['val_cost'] * self.val_loss - self.entropy_cost * self.entropy_loss
 
 		# Make update operations for gradient applications
 		self.update_grads = opt.compute_gradients(total_loss)
@@ -137,6 +138,7 @@ def main(gpu_id=None):
 	f = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'future_val')
 	t = tf.placeholder(tf.float32, [par['batch_size'], 1], 'terminal_state')
 	r = tf.placeholder(tf.float32, [par['batch_size'], 1], 'reward')
+	e = tf.placeholder(tf.float32, [], 'entropy_cost')
 	s = tf.placeholder_with_default(np.float32(1.), [], 'step')
 
 	# Start TensorFlow session
@@ -145,7 +147,7 @@ def main(gpu_id=None):
 		# Set up and initialize model on desired device
 		device = '/cpu:0' if gpu_id is None else '/gpu:0'
 		with tf.device(device):
-			model = Model(x, g, r, a, f, t, s)
+			model = Model(x, g, r, a, f, t, s, e)
 		sess.run(tf.global_variables_initializer())
 
 		# Make lists for recording model performance
@@ -233,18 +235,16 @@ def main(gpu_id=None):
 						reward += reward_list[par['n_step']-k-1]*par['discount_rate']**(n-k)
 					done = np.minimum(1., done)
 
+					# ent_cost = (0.99*par['entropy_cost'])*(0.99995**fr) + 0.01*par['entropy_cost']
+					ent_cost = par['entropy_cost']
 					sess.run(model.update_grads, feed_dict={x:obs_list[-2-n], \
-						a:action_list[-2-n], r:reward, f:val, t:done, g:gate, s:n+1})
+						a:action_list[-2-n], r:reward, f:val, t:done, g:gate, s:n+1, e:ent_cost})
 
 				obs_list    = obs_list[-1:0]
 				action_list = action_list[-1:0]
 				reward_list = reward_list[-1:0]
 				value_list  = value_list[-1:0]
 				done_list   = done_list[-1:0]
-
-			# # Train the model
-			# _ = sess.run([model.update_grads], \
-			# 	feed_dict={x:obs, g:gate, a:action, r:reward, f:future_val, t:done})
 
 			# Update observation window
 			obs = new_obs
@@ -278,7 +278,7 @@ def main(gpu_id=None):
 					
 					for _ in range(par['k_skip']):
 						render_fr_count += 1
-						render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(action)
+						render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(render_action)
 						
 						# Update record states
 						render_reward += render_reward_frame
