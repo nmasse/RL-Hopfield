@@ -19,7 +19,6 @@ class Stimulus:
 
 		self.cached_nn = False
 
-
 	def start_render(self, frame, render=True):
 		""" Push the standard environments into a backup, replace with
 			environments that can be rendered to file """
@@ -84,7 +83,7 @@ class Stimulus:
 
 			# Aggregate the indices into a grid for easy indexing
 			self.nn_ind_set = np.meshgrid(*idx, sparse=False, indexing='ij')
-			
+
 			# Declare the interpolation indexing as complete and raise the
 			# flag to retrieve the cached result next time
 			self.cached_nn = True
@@ -127,6 +126,8 @@ class Stimulus:
 		# Reset all environments
 		obs = [e.reset() for e in self.envs]
 
+		self.obs_shape = obs[0].shape
+
 		# Preprocess original observations
 		obs = self.preprocess(obs)
 
@@ -149,17 +150,29 @@ class Stimulus:
 		# Iterate over trials per batch
 		for i in range(par['batch_size']):
 
+			r = 0.
+			d = 0
+			o = np.zeros(self.obs_shape)
+			for k in range(par['frame_skip']):
+				if d == 0:
+					o0, r0, d0, _ = self.envs[i].step(action[i])
+				r += r0
+				d += d0
+
+				if k >= par['frame_skip']-2:
+					o += o0
+
 			# Apply the desired action
-			o, r, d, _ = self.envs[i].step(action[i])
+			#o, r, d, _ = self.envs[i].step(action[i])
 
 			# Reset the environment the episode is complete
-			if d:
+			if d > 0:
 				o = self.envs[i].reset()
 
 			# Collect observation and reward
-			obs.append(o)
+			obs.append(o/2)
 			reward.append(r)
-			done.append(d)
+			done.append(np.minimum(1, d))
 
 		# Preprocess batch of frames
 		obs = self.preprocess(obs)
@@ -178,7 +191,7 @@ class Stimulus:
 		reward_sign = reward_sign.reshape(-1,1)
 		reward = reward.reshape(-1,1)
 		done = done.reshape(-1,1)
-		
+
 		# Return observation and reward as float32 arrays
 		return obs, reward, reward_sign, done
 

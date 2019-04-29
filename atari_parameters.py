@@ -38,24 +38,29 @@ par = {
 	'covariance_method'		: True,
 
 	# Striatum params
-	'n_striatum'			: 2,
+	'n_striatum'			: 1024,
 	'striatum_th'			: 0.5, # was 0.5
 	'trace_th'				: 10., # was 10
 	'n_out'					: 512,
 	'trace_decay'			: 0.8,
+	'action_weight'			: 10.,
 
 	# Timings and rates
 	'learning_rate'			: 1e-4,
 	'drop_rate'				: 0.5,
 	'discount_rate'			: 0.99,
 	'n_step'				: 5,
-	'gate_reset'			: 250,
+	'gate_reset'			: 5,
 
 	# Task specs
-	'gym_env'				: 'SpaceInvaders-v0',
+	'gym_env'				: 'SpaceInvadersNoFrameskip-v4',
+	#'gym_env'				: 'SpaceInvaders-v0',
+	'task_name'				: 'SpaceInvaders',
 	'task'					: 'atari',
 	'num_frames'			: 25000000000,
 	'k_skip'				: 4,
+	'frame_skip'			: 4,
+	'action_repeat'			: 4,
 	'rewards'				: [-1.,1.],
 	'num_actions'			: 4,		# The number of different actions available to the agent
 	'room_width'			: 8,
@@ -66,7 +71,7 @@ par = {
 	# Cost values
 	'sparsity_cost'         : 2e-1, # was 1e-2
 	'weight_cost'           : 1e-6,  # was 1e-6
-	'entropy_cost'          : 0.001,
+	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
 
