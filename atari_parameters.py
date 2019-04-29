@@ -13,13 +13,13 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'plotdir'				: './plotdir/',
-	'savefn'				: 'ent005_steps100',
+	'savefn'				: 'beamrider_longupdate_gate1000',
 	'RL_method'				: 'policy',
 
 	# Network shape
 	'n_hidden'				: [200, 200],
 	'n_encoding'			: [64, 128],
-	'n_pol'					: 6,
+	'n_pol'					: 9,
 	'n_val'					: 1,
 	'n_latent'				: 512,
 	'n_flat'				: 7*6*64,

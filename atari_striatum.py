@@ -115,7 +115,7 @@ def main(gpu_id=None):
 		os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
 
 	# Reduce memory consumption for GPU 0
-	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.45)# \
+	gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)# \
 #		if gpu_id == '3' else tf.GPUOptions()
 
 	# Initialize stimulus environment and obtain first observations
@@ -216,10 +216,11 @@ def main(gpu_id=None):
 				done_list = done_list[1:]
 
 			if fr%par['n_step'] == 0 and fr >= par['n_step']+1:
-				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
+				# sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
+				pass
 
 			if fr%par['gate_reset']==0 and fr>0:
-				#sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
+				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
 				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
 					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 				#gate = np.ones_like(gate)
