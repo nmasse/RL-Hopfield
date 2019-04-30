@@ -129,6 +129,6 @@ def encoder(x, n_latent, var_dict=None, trainable=True):
 		flat0 = tf.reshape(conv0, [batch_size, -1])
 
 		# Convert to latent vector
-		latent = dense_layer(flat0, n_latent, var_dict=vd, trainable=trainable)
+		latent = dense_layer(flat0, n_latent, name='lat', var_dict=vd, trainable=trainable)
 
 	return latent
