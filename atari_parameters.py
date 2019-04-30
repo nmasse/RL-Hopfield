@@ -13,13 +13,13 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'plotdir'				: './plotdir/',
-	'savefn'				: 'beamrider_longupdate_gate1000',
+	'savefn'				: 'spaceinvaders_capsule_pred_test',
 	'RL_method'				: 'policy',
 
 	# Network shape
 	'n_hidden'				: [200, 200],
 	'n_encoding'			: [64, 128],
-	'n_pol'					: 9,
+	'n_pol'					: 6,
 	'n_val'					: 1,
 	'n_latent'				: 512,
 	'n_flat'				: 7*6*64,
@@ -74,6 +74,7 @@ par = {
 	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
+	'pred_cost'				: 0.1,
 
 
 	'n_filters'				: [32,64,64],
@@ -81,7 +82,7 @@ par = {
 	'n_stride'				: [4,2,1], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 32,
+	'batch_size'			: 16,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 

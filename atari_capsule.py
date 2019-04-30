@@ -131,4 +131,4 @@ def encoder(x, n_latent, var_dict=None, trainable=True):
 		# Convert to latent vector
 		latent = dense_layer(flat0, n_latent, name='lat', var_dict=vd, trainable=trainable)
 
-	return latent
+	return latent, caps0
