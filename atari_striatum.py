@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import atari_stimulus as stimulus
 from atari_parameters import par
 import atari_encoder as ae
-import striatum
+#import striatum
 import time
 
 # Match GPU IDs to nvidia-smi command
@@ -35,7 +35,7 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu):
 	"""
 
 	n_in = x.shape.as_list()[-1]
-	W = tf.get_variable('W_'+name, shape=[n_in, n_out])
+	W = tf.get_variable('W_'+name, shape=[n_in, n_out], initializer = tf.variance_scaling_initializer(scale=2.))
 	b = tf.get_variable('b_'+name, shape=[1, n_out])
 
 	y = x @ W + b
@@ -57,20 +57,43 @@ class Model:
 		self.step = step
 		self.lr_multiplier = lr_multiplier
 
-		#self.striatum = striatum.Network()
-
 		# Run encoder
 		flat, conv_shapes = ae.encoder(self.stim, par['n_latent'], \
 			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
 		z = dense_layer(flat, par['n_latent'], 'out')
-		z = self.gate * z
+		#top_k, _ = tf.nn.top_k(z, k = 50)
+		#top_cond = z >= top_k[:,-50:-49]
+		#z = tf.where(top_cond, z, tf.zeros(z.shape))
+		self.latent = self.gate * z
+		self.val = dense_layer(self.latent, par['n_val'], 'val', activation = tf.identity)
 
-		self.pol = dense_layer(z, par['n_pol'], 'pol', activation = tf.identity)
+		#self.striatum_interaction()
+		#self.latent = tf.concat([self.latent, self.striatum_out], axis = 1)
+
+		self.pol = dense_layer(self.latent, par['n_pol'], 'pol', activation = tf.identity)
 		self.pol = tf.nn.softmax(self.pol, axis = 1)
-		self.val = dense_layer(z, par['n_val'], 'val', activation = tf.identity)
+
 
 		# Run optimizer
 		self.optimize()
+
+
+
+	def striatum_interaction(self):
+
+		self.striatum = striatum.Network()
+
+		pred_val = self.reward + (par['discount_rate']**self.step)*self.future_val*(1. - self.terminal_state)
+		delta_value = pred_val - self.val
+		self.update_striatum = self.striatum.write_striatum(self.latent, self.action, delta_value)
+
+		striatum_out = self.striatum.read_striatum(self.latent)
+		self.striatum_out = dense_layer(striatum_out, 100, 'striatum_out')
+		#self.pred_action = dense_layer(self.striatum_out, par['n_pol'], 'striatum_pred', activation = tf.identity)
+		#self.pred_action = tf.nn.softmax(self.pred_action , axis = 1)
+
+		self.U = self.striatum.U
+		self.W = self.striatum.W
 
 
 	def optimize(self):
@@ -78,14 +101,22 @@ class Model:
 		epsilon = 1e-6
 
 		# Collect all variables in the model and list them out
-		var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+		var_list_all = tf.trainable_variables()
+		var_list = [var for var in var_list_all if not 'striatum' in var.op.name]
+		var_list = var_list_all
+
+		var_list_striatum = [var for var in var_list_all if 'striatum' in var.op.name]
 		self.var_dict = {var.op.name : var for var in var_list}
 		print('Variables:')
 		[print(var.op.name.ljust(20), ':', var.shape) for var in var_list]
 		print()
+		print('Striatum Variables:')
+		[print(var.op.name.ljust(20), ':', var.shape) for var in var_list_striatum]
+		print()
 
 		# Make optimizer
 		opt = AdamOpt.AdamOpt(var_list, algorithm = 'rmsprop', learning_rate = par['learning_rate'])
+		opt_striatum = AdamOpt.AdamOpt(var_list_striatum, algorithm = 'rmsprop', learning_rate = par['learning_rate'])
 
 		pred_val = self.reward + (par['discount_rate']**self.step)*self.future_val*(1. - self.terminal_state)
 		advantage = pred_val - self.val
@@ -102,7 +133,13 @@ class Model:
 		self.update_grads = opt.compute_gradients_rmsprop(loss)
 
 		self.update_weights = opt.update_weights_rmsprop(lr_multiplier = self.lr_multiplier)
+		"""
+		self.loss_striatum = -tf.reduce_mean(self.action*tf.log(self.pred_action + epsilon))
 
+		self.update_striatum_grads = opt_striatum.compute_gradients_rmsprop(self.loss_striatum)
+
+		self.update_striatum_weights = opt_striatum.update_weights_rmsprop(lr_multiplier = self.lr_multiplier)
+		"""
 
 
 
@@ -155,6 +192,9 @@ def main(gpu_id=None):
 		action_list = []
 		value_list = []
 		done_list = []
+		loss_striatum = 0.
+		U = 0.
+		W = 0.
 		gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
 			par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
 
@@ -174,7 +214,7 @@ def main(gpu_id=None):
 			# Generate next four frames
 			reward = np.zeros((par['batch_size'], 1))
 			done   = np.zeros((par['batch_size'], 1))
-			for _ in range(par['k_skip']):
+			for _ in range(par['action_repeat']):
 				obs, reward_frame, reward_sign_frame, done_frame = environment.agent_action(action)
 				#reward += reward_frame
 				reward += reward_sign_frame
@@ -190,6 +230,8 @@ def main(gpu_id=None):
 
 				# Record overall high scores for each agent
 				high_score = np.maximum(high_score, agent_score)
+
+
 
 			reward_list.append(reward)
 			reward_list_full.append(reward)
@@ -209,6 +251,18 @@ def main(gpu_id=None):
 					sess.run(model.update_grads, feed_dict = {x : obs_list[t0], \
 						a: action_list[t0], r : reward, f: val, ts: done, g:gate, \
 						s:t1-t0+1, lr: lr_multiplier})
+					"""
+					if t0 == par['n_step']-1:
+						#_, _, loss_striatum = sess.run([model.update_striatum_grads, \
+						#	model.update_striatum_weights, model.loss_striatum], feed_dict = {x : obs_list[t0], \
+						#	a: action_list[t0], r : reward, f: val, ts: done, g:gate, \
+						#	s:1, lr: lr_multiplier})
+						sess.run(model.update_striatum, feed_dict = {x : obs_list[t0], \
+							a: action_list[t0], r : reward, f: val, ts: done, g:gate, \
+							s:1, lr: lr_multiplier})
+						U, W = sess.run([model.U, model.W])
+					"""
+
 
 				obs_list = obs_list[1:]
 				action_list = action_list[1:]
@@ -230,12 +284,13 @@ def main(gpu_id=None):
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
 			if fr%1000==0:
-				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
-					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
+				print('Frame {:>7} | Policy {} | Str. Loss {:5.3f}| Reward {:5.3f}  | Mean Final HS: {:7.2f}'.format(\
+					fr, np.round(np.mean(pol,axis=0),2), loss_striatum, np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
 				weights = sess.run(model.var_dict)
-				fn = './savedir/weights_batch{}_drop5{}_reset{}_iter0.pkl'.format(par['batch_size'], \
-					int(par['drop_rate']*10), par['gate_reset'])
+				fn = './savedir/{}_weights_batch{}_drop{}_reset{}_iter0.pkl'.format(par['task_name'], \
+					par['batch_size'], int(par['drop_rate']*10), par['gate_reset'])
 				pickle.dump(weights, open(fn,'wb'))
+				#print('U', np.mean(np.abs(U)), ' W', np.mean(np.abs(W)))
 
 			if fr%20000 == 0 and fr != 0:
 
@@ -244,7 +299,7 @@ def main(gpu_id=None):
 				reward_list = []
 				done_list = []
 
-				N = 10
+				N = 2
 				render_done       = np.zeros([par['batch_size'], N], dtype=np.float32)
 				render_reward     = np.zeros([par['batch_size'], N], dtype=np.float32)
 				render_best_score = np.zeros([par['batch_size'], N], dtype=np.float32)
@@ -265,7 +320,7 @@ def main(gpu_id=None):
 						render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:np.ones_like(gate)})
 						render_action = np.array(np.stack([np.random.multinomial(1, render_pol[i,:]-1e-6) for i in range(par['batch_size'])]))
 
-						for _ in range(par['k_skip']):
+						for _ in range(par['action_repeat']):
 							render_fr_count += 1
 							render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(render_action)
 
@@ -352,8 +407,9 @@ def display_data(obs, W_pos, W_neg, W_trace_pos, W_trace_neg, pol, reward, rewar
 	"""
 def print_key_params():
 
-	key_params = ['savefn', 'striatum_th', 'trace_th', 'learning_rate', 'discount_rate',\
-		'entropy_cost', 'val_cost', 'prop_top', 'drop_rate','batch_size','n_step','gate_reset']
+	key_params = ['gym_env', 'savefn', 'learning_rate', 'discount_rate',\
+		'entropy_cost', 'val_cost', 'drop_rate','batch_size','n_step',\
+		'gate_reset', 'batch_size','k_skip','action_repeat']
 	print('Key parameters...')
 	for k in key_params:
 		print(k, ': ', par[k])
