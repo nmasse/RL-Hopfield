@@ -60,7 +60,7 @@ def conv_layer(x, n_filter, n_kernel, stride, name, activation=tf.nn.relu, var_d
 		#f = tf.get_variable(name, trainable=trainable, \
 		#	initializer=filter_init([n_kernel, n_kernel, in_channels, n_filter]))
 		f = tf.get_variable(name, trainable=trainable, shape=[n_kernel, n_kernel, in_channels, n_filter], \
-			initializer=tf.contrib.layers.xavier_initializer())
+			initializer = tf.variance_scaling_initializer(scale=2.))
 	else:
 		f = tf.get_variable(name, initializer=var_dict[name], trainable=trainable)
 
@@ -128,7 +128,7 @@ def encoder(data0, n_latent, var_dict=None, trainable=True):
 		conv0  = conv_layer(data0, n_filter=32, n_kernel=8, stride=4, name='conv1', var_dict=vd, trainable=True)
 		conv1  = conv_layer(conv0, n_filter=64, n_kernel=4, stride=2, name='conv2', var_dict=vd, trainable=True)
 		conv2  = conv_layer(conv1, n_filter=64, n_kernel=3, stride=1, name='conv3', var_dict=vd, trainable=True)
-		
+
 		# Flatten convolution output, apply dense layers to make latent vector
 		flat0  = tf.reshape(conv2, [batch_size, -1])
 
