@@ -13,7 +13,7 @@ par = {
 	# Setup parameters
 	'savedir'				: './savedir/',
 	'plotdir'				: './plotdir/',
-	'savefn'				: 'ent005_steps100',
+	'savefn'				: 'spaceinvaders_capsule_pred_test',
 	'RL_method'				: 'policy',
 
 	# Network shape
@@ -74,6 +74,7 @@ par = {
 	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
+	'pred_cost'				: 0.1,
 
 
 	'n_filters'				: [32,64,64],
@@ -81,7 +82,7 @@ par = {
 	'n_stride'				: [4,2,1], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 32,
+	'batch_size'			: 16,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 

@@ -205,6 +205,7 @@ if __name__ == '__main__':
 	obs = s.reset_environments()
 	print('Stimulus loaded and reset.')
 
+
 	t0 = time.time()
 	# rew_hist = []
 	# high_score = np.zeros([par['batch_size'], 1])

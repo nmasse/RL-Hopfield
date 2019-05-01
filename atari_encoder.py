@@ -125,16 +125,16 @@ def encoder(data0, n_latent, var_dict=None, trainable=True):
 	with tf.variable_scope('encoder'):
 
 		# Run convolutional layers to compress input data
-		conv0  = conv_layer(data0, n_filter=32, n_kernel=8, stride=4, name='conv1', var_dict=vd, trainable=True)
-		conv1  = conv_layer(conv0, n_filter=64, n_kernel=4, stride=2, name='conv2', var_dict=vd, trainable=True)
-		conv2  = conv_layer(conv1, n_filter=64, n_kernel=3, stride=1, name='conv3', var_dict=vd, trainable=True)
+		conv0  = conv_layer(data0, n_filter=32, n_kernel=8, stride=4, name='conv1', var_dict=vd, trainable=trainable)
+		conv1  = conv_layer(conv0, n_filter=64, n_kernel=4, stride=2, name='conv2', var_dict=vd, trainable=trainable)
+		conv2  = conv_layer(conv1, n_filter=64, n_kernel=3, stride=1, name='conv3', var_dict=vd, trainable=trainable)
 
 		# Flatten convolution output, apply dense layers to make latent vector
 		flat0  = tf.reshape(conv2, [batch_size, -1])
 
 	# Collect the convolutional shapes for later decovolution
 	conv_shapes = [v.shape.as_list() for v in [data0, conv0, conv1, conv2]]
-	print('conv_shapes', conv_shapes)
+
 	return flat0, conv_shapes
 
 
@@ -168,15 +168,12 @@ def decoder(latent, conv_shapes, var_dict=None, trainable=True):
 	with tf.variable_scope('decoder'):
 
 		# Apply dense layers from latent vector, reshape for deconvolution
-		dense0  = dense_layer(latent, n_out=2048, name='dense0', var_dict=vd, trainable=True)
-		dense1  = dense_layer(latent, n_out=2048, name='dense1', var_dict=vd, trainable=True)
-		dense2  = dense_layer(dense0, n_out=n,    name='dense2', var_dict=vd, trainable=True)
-		unflat0 = tf.reshape(dense2, conv_shapes[-1])
+		dense0  = dense_layer(latent, n_out=n, name='dense0', var_dict=vd, trainable=trainable)
+		unflat0 = tf.reshape(dense0, conv_shapes[-1])
 
 		# Run deconvolutional layers to produce reconstruction
-		deconv0 = deconv_layer(unflat0, n_filter=64, n_kernel=4, stride=2, shape=s[0], name='deconv0', var_dict=vd, trainable=True)
-		deconv1 = deconv_layer(deconv0, n_filter=32, n_kernel=4, stride=2, shape=s[1], name='deconv1', var_dict=vd, trainable=True)
-		deconv2 = deconv_layer(deconv1, n_filter=32, n_kernel=8, stride=4, shape=s[2], name='deconv2', var_dict=vd, trainable=True)
-		recon   = deconv_layer(deconv2, n_filter=4 , n_kernel=2, stride=1, shape=s[3], name='deconv3', var_dict=vd, trainable=True, activation=tf.identity)
+		deconv0 = deconv_layer(unflat0, n_filter=64, n_kernel=3, stride=1, shape=s[0], name='deconv0', var_dict=vd, trainable=trainable)
+		deconv1 = deconv_layer(deconv0, n_filter=32, n_kernel=4, stride=2, shape=s[1], name='deconv1', var_dict=vd, trainable=trainable)
+		recon   = deconv_layer(deconv1, n_filter=4,  n_kernel=8, stride=4, shape=s[2], name='deconv2', var_dict=vd, trainable=trainable)
 
 	return recon
