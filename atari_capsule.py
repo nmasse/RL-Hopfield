@@ -40,12 +40,13 @@ def dense_layer(x, n_out, name, activation=tf.nn.relu, var_dict=None, trainable=
 	return activation(y)
 
 
-def capsule_conv_layer(x, n_features, n_properties, n_kernel, stride, \
+def capsule_conv_layer(x, n_features, n_preproperties, n_properties, n_kernel, stride, \
 		name, var_dict=None, trainable=True):
 
 	# Use the number of features and properties together as "filters"
 	# in the convolutional layer
-	n_filter = n_features * n_properties
+	n_prefilter = n_features * n_preproperties
+	n_filter    = n_features * n_properties
 
 	# No color channels - set to 1
 	in_channels = 1
@@ -53,21 +54,28 @@ def capsule_conv_layer(x, n_features, n_properties, n_kernel, stride, \
 	# Make convolutional filter variable either by creating a new one or
 	# using a variable provided through var_dict
 	if var_dict is None:
-		f = tf.get_variable(name, trainable=trainable, shape=[4, n_kernel, n_kernel, in_channels, n_filter], \
+		f0 = tf.get_variable(name+'_filter', trainable=trainable, shape=[4, n_kernel, n_kernel, in_channels, n_prefilter], \
+			initializer=tf.contrib.layers.xavier_initializer())
+		f1 = tf.get_variable(name+'_transf', trainable=trainable, shape=[n_features, n_preproperties, n_properties], \
 			initializer=tf.contrib.layers.xavier_initializer())
 	else:
-		f = tf.get_variable(name, initializer=var_dict[name], trainable=trainable)
+		f0 = tf.get_variable(name+'_filter', initializer=var_dict[name+'_filter'], trainable=trainable)
+		f1 = tf.get_variable(name+'_transf', initializer=var_dict[name+'_transf'], trainable=trainable)
 
-	# Generate convolution operation
+	# Generate first 3D convolution operation
 	strides = [1, 4, stride, stride, 1]
-	y = tf.nn.conv3d(x, f, strides, 'SAME')
+	y = tf.nn.conv3d(x, f0, strides, 'SAME')
 
-	# Reshape into features x properties
+	# Reshape into [b x 25 x 21 x features x pre_properties]
 	y_shape = y.shape.as_list()[:-1]
-	y = tf.reshape(y, y_shape + [n_features, n_properties])
+	y = tf.reshape(y, y_shape + [n_features, n_preproperties])
 	y = tf.squeeze(y)
 
-	# y.shape = [b, 25, 21, 32, 5]
+	# Project from 20 units to 5, with separate projects for each feature
+	# [batch, x, y, feature, pre_prop], [feature, pre_prop, prop]
+	#    --> [batch, x, y, feature, prop]
+	y = tf.einsum('bxyfi,fij->bxyfj', y, f1)
+
 	return y
 
 
@@ -87,7 +95,7 @@ def capsule_conv_activation(x):
 	return y
 
 
-def encoder(x, n_latent, var_dict=None, trainable=True):
+def encoder(x, n_features, n_preproperties, n_properties, var_dict=None, trainable=True):
 	""" Convolve the provided data to generate a latent representation.
 		Based roughly on Hinton's capsule concept.  Uses a 3d convolution
 		to generate convolution across time as well as space.
@@ -114,21 +122,14 @@ def encoder(x, n_latent, var_dict=None, trainable=True):
 	# x.shape = [b, 4, 100, 84, 1]
 	x = tf.transpose(x, [0, 3, 1, 2])[...,tf.newaxis]
 
-	# Set the number of features and properties
-	n_features   = 16
-	n_properties = 5
-
 	# Run encoder
 	with tf.variable_scope('encoder'):
 
 		# Run convolutional layers to compress input data
-		conv0 = capsule_conv_layer(x, n_features, n_properties, 8, 4, name='conv1', var_dict=vd, trainable=trainable)
+		conv0 = capsule_conv_layer(x, n_features, n_preproperties, n_properties, 8, 4, name='conv1', var_dict=vd, trainable=trainable)
 		caps0 = capsule_conv_activation(conv0)
 
 		# Flatten convolution
-		flat0 = tf.reshape(conv0, [batch_size, -1])
+		# flat0 = tf.reshape(conv0, [batch_size, -1])
 
-		# Convert to latent vector
-		latent = dense_layer(flat0, n_latent, name='lat', var_dict=vd, trainable=trainable)
-
-	return latent, caps0
+	return caps0

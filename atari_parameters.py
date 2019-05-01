@@ -82,7 +82,7 @@ par = {
 	'n_stride'				: [4,2,1], # originally 4,2,2
 
 	# Training specs
-	'batch_size'			: 16,
+	'batch_size'			: 7,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 

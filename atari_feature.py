@@ -67,26 +67,44 @@ class Model:
 
 	def run_model(self):
 
+		# Set the number of features and properties
+		n_features      = 16
+		n_preproperties = 20
+		n_properties    = 5
+
 		# Run encoder to get latent vector
-		self.latent, self.caps = ae.encoder(self.stim, par['n_latent'], \
+		self.caps = ae.encoder(self.stim, n_features, n_preproperties, n_properties, \
 			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
 
-		# Combine latent vector with action
-		source_vec = tf.concat([self.latent, self.action], axis=-1)
+		# Process action such that it may be added to each set of feature properties
+		reshaped_action = tf.reshape(self.action, [par['batch_size'],1,1,1,par['n_pol']])
+		tiled_action    = tf.tile(reshaped_action, multiples=[1,*self.caps.shape.as_list()[1:-1],1])
+			
+		# Combine capsule properties and action
+		source = tf.concat([self.caps, tiled_action], axis=-1)
 
-		# Make variables for capsule decoding
-		n_dhid = 2048
-		W_pred = tf.get_variable('W_pred', shape=[n_dhid] + self.caps.shape.as_list()[1:])
-		b_pred = tf.get_variable('b_pred', shape=self.caps.shape)
+		# Make variables for capsule prediction
+		W_pred = tf.get_variable('W_pred', \
+			shape=[n_features,n_properties+par['n_pol'],n_properties])
+		b_pred = tf.get_variable('b_pred', shape=[1,1,1,n_features,n_properties])
 
-		# Decode the latent + action into the next capsule state
-		decode = dense_layer(source_vec, n_dhid, 'decode')
-		self.pred = tf.einsum('tn,nxyfp->txyfp', decode, W_pred) + b_pred
+		# Project from properties + action to strict properties prediction
+		# [batch, x, y, feature, prop + action], [feature, prop + action, prop]
+		#    --> [batch, x, y, feature, prop]
+		self.pred = tf.einsum('bxyfi,fij->bxyfj', source, W_pred) + b_pred
+
+		# Flatten capsule output to get latent state and project
+		# through hidden layers
+		self.latent = tf.reshape(self.caps, [par['batch_size'], -1])
+		h0 = dense_layer(self.latent, 2048, 'h0')
+		h1 = dense_layer(h0, 2048, 'h1')
 
 		# Calculate policy and value outputs
-		self.pol = dense_layer(self.latent, par['n_pol'], 'pol', activation=tf.identity)
+		self.pol = dense_layer(h1, par['n_pol'], 'pol', activation=tf.identity)
+		self.val = dense_layer(h1, par['n_val'], 'val', activation=tf.identity)
+
+		# Normalize policy for entropy calculations
 		self.pol = tf.nn.softmax(self.pol, axis = 1)
-		self.val = dense_layer(self.latent, par['n_val'], 'val', activation=tf.identity)
 
 
 	def optimize(self):
@@ -261,7 +279,7 @@ def main(gpu_id=None):
 			if fr%1000==0:
 				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
 					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
-				print(' '*14 + '| Pred Loss {:5.3f}'.format(pred_loss))
+				print(' '*14 + '| Pred Loss {:5.3f}'.format(pred_loss_total))
 				weights = sess.run(model.var_dict)
 				fn = './savedir/weights_batch{}_drop5{}_reset{}_iter0.pkl'.format(par['batch_size'], \
 					int(par['drop_rate']*10), par['gate_reset'])
