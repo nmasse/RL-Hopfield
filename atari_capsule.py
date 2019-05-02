@@ -55,9 +55,9 @@ def capsule_conv_layer(x, n_features, n_preproperties, n_properties, n_kernel, s
 	# using a variable provided through var_dict
 	if var_dict is None:
 		f0 = tf.get_variable(name+'_filter', trainable=trainable, shape=[4, n_kernel, n_kernel, in_channels, n_prefilter], \
-			initializer=tf.contrib.layers.xavier_initializer())
+			initializer=tf.variance_scaling_initializer(scale=2.))
 		f1 = tf.get_variable(name+'_transf', trainable=trainable, shape=[n_features, n_preproperties, n_properties], \
-			initializer=tf.contrib.layers.xavier_initializer())
+			initializer=tf.variance_scaling_initializer(scale=2.))
 	else:
 		f0 = tf.get_variable(name+'_filter', initializer=var_dict[name+'_filter'], trainable=trainable)
 		f1 = tf.get_variable(name+'_transf', initializer=var_dict[name+'_transf'], trainable=trainable)
@@ -95,7 +95,7 @@ def capsule_conv_activation(x):
 	return y
 
 
-def encoder(x, n_features, n_preproperties, n_properties, var_dict=None, trainable=True):
+def encoder(x, n_kernel, n_features, n_preproperties, n_properties, var_dict=None, trainable=True):
 	""" Convolve the provided data to generate a latent representation.
 		Based roughly on Hinton's capsule concept.  Uses a 3d convolution
 		to generate convolution across time as well as space.
@@ -126,7 +126,8 @@ def encoder(x, n_features, n_preproperties, n_properties, var_dict=None, trainab
 	with tf.variable_scope('encoder'):
 
 		# Run convolutional layers to compress input data
-		conv0 = capsule_conv_layer(x, n_features, n_preproperties, n_properties, 8, 4, name='conv1', var_dict=vd, trainable=trainable)
+		conv0 = capsule_conv_layer(x, n_features, n_preproperties, n_properties, \
+			n_kernel, 4, name='conv1', var_dict=vd, trainable=trainable)
 		caps0 = capsule_conv_activation(conv0)
 
 		# Flatten convolution

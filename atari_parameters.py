@@ -17,7 +17,7 @@ par = {
 	'RL_method'				: 'policy',
 
 	# Network shape
-	'n_hidden'				: [200, 200],
+	'n_hidden'				: 2048,
 	'n_encoding'			: [64, 128],
 	'n_pol'					: 6,
 	'n_val'					: 1,
@@ -47,7 +47,7 @@ par = {
 
 	# Timings and rates
 	'learning_rate'			: 1e-4,
-	'drop_rate'				: 0.5,
+	'drop_rate'				: 0.2,
 	'discount_rate'			: 0.99,
 	'n_step'				: 5,
 	'gate_reset'			: 5,
@@ -74,15 +74,16 @@ par = {
 	'entropy_cost'          : 0.01,
 	'val_cost'              : 0.5,
 	'latent_cost'			: 0.00000,
-	'pred_cost'				: 0.1,
+	'pred_cost'				: 0.01,
 
-
-	'n_filters'				: [32,64,64],
-	'n_kernels'				: [8,4,3], # originally 8,4,4
-	'n_stride'				: [4,2,1], # originally 4,2,2
+	# Encoding configuration
+	'kernel_size'			: 8,
+	'n_features'			: 16,
+	'n_preproperties'		: 20,
+	'n_properties'			: 5,
 
 	# Training specs
-	'batch_size'			: 7,
+	'batch_size'			: 32,
 	'train_encoder'			: True,
 	'load_weights'			: False,
 

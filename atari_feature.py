@@ -68,13 +68,16 @@ class Model:
 	def run_model(self):
 
 		# Set the number of features and properties
-		n_features      = 16
-		n_preproperties = 20
-		n_properties    = 5
+		n_features      = par['n_features']
+		n_preproperties = par['n_preproperties']
+		n_properties    = par['n_properties']
 
 		# Run encoder to get latent vector
-		self.caps = ae.encoder(self.stim, n_features, n_preproperties, n_properties, \
+		self.caps = ae.encoder(self.stim, par['kernel_size'], n_features, n_preproperties, n_properties, \
 			var_dict=par['loaded_var_dict'], trainable=par['train_encoder'])
+
+		print(self.caps.shape)
+		quit()
 
 		# Process action such that it may be added to each set of feature properties
 		reshaped_action = tf.reshape(self.action, [par['batch_size'],1,1,1,par['n_pol']])
@@ -84,9 +87,12 @@ class Model:
 		source = tf.concat([self.caps, tiled_action], axis=-1)
 
 		# Make variables for capsule prediction
-		W_pred = tf.get_variable('W_pred', \
-			shape=[n_features,n_properties+par['n_pol'],n_properties])
-		b_pred = tf.get_variable('b_pred', shape=[1,1,1,n_features,n_properties])
+		with tf.variable_scope('predictor'):
+			W_pred = tf.get_variable('W_pred', \
+				shape=[n_features,n_properties+par['n_pol'],n_properties],
+				initializer=tf.variance_scaling_initializer(scale=2.))
+			b_pred = tf.get_variable('b_pred', shape=[1,1,1,n_features,n_properties],
+				initializer=tf.zeros_initializer())
 
 		# Project from properties + action to strict properties prediction
 		# [batch, x, y, feature, prop + action], [feature, prop + action, prop]
@@ -96,12 +102,13 @@ class Model:
 		# Flatten capsule output to get latent state and project
 		# through hidden layers
 		self.latent = tf.reshape(self.caps, [par['batch_size'], -1])
-		h0 = dense_layer(self.latent, 2048, 'h0')
-		h1 = dense_layer(h0, 2048, 'h1')
+		with tf.variable_scope('agent'):
+			h0 = self.gate[0,...]*dense_layer(self.latent, par['n_hidden'], 'h0')
+			h1 = self.gate[1,...]*dense_layer(h0, par['n_hidden'], 'h1')
 
-		# Calculate policy and value outputs
-		self.pol = dense_layer(h1, par['n_pol'], 'pol', activation=tf.identity)
-		self.val = dense_layer(h1, par['n_val'], 'val', activation=tf.identity)
+			# Calculate policy and value outputs
+			self.pol = dense_layer(h1, par['n_pol'], 'pol', activation=tf.identity)
+			self.val = dense_layer(h1, par['n_val'], 'val', activation=tf.identity)
 
 		# Normalize policy for entropy calculations
 		self.pol = tf.nn.softmax(self.pol, axis = 1)
@@ -168,7 +175,7 @@ def main(gpu_id=None):
 	a  = tf.placeholder(tf.float32, [par['batch_size'], par['n_pol']], 'action')
 	f  = tf.placeholder(tf.float32, [par['batch_size'], par['n_val']], 'future_val')
 	fc = tf.placeholder(tf.float32, [par['batch_size'], 25, 21, 16, 5], 'future_capsule')
-	g  = tf.placeholder(tf.float32, [par['batch_size'], par['n_latent']], 'gate')
+	g  = tf.placeholder(tf.float32, [2, par['batch_size'], par['n_hidden']], 'gate')
 	ts = tf.placeholder(tf.float32, [par['batch_size'], 1], 'terminal_state')
 	s  = tf.placeholder(tf.float32, [], 'step')
 	lr = tf.placeholder(tf.float32, [], 'learning_rate_mult')
@@ -197,9 +204,9 @@ def main(gpu_id=None):
 		done_list        = []
 
 		# Make initial states for model
-		gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
-			par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
+		gate = generate_gate(par['n_hidden'])
 		pred_loss_total = -1.
+		base_pred_loss = -1.
 
 		# Start training loop
 		print('Starting training.\n')
@@ -243,6 +250,7 @@ def main(gpu_id=None):
 
 			if len(obs_list) >= par['n_step']+1:
 				pred_loss_total = 0.
+				base_pred_loss = 0.
 				for t0 in range(par['n_step']):
 					reward = np.zeros((par['batch_size'], 1))
 					done = np.zeros((par['batch_size'], 1))
@@ -253,9 +261,11 @@ def main(gpu_id=None):
 					done = np.minimum(1., done)
 
 					# train the model
-					_, pred_loss = sess.run([model.update_grads, model.pred_loss], feed_dict = {x : obs_list[t0], \
-						a: action_list[t0], r : reward, f: val, fc: state_list[t0+1], \
-						ts: done, g:gate, s:t1-t0+1, lr: lr_multiplier})
+					_, caps_t0, pred_loss = sess.run([model.update_grads, model.caps, model.pred_loss], \
+						feed_dict = {x : obs_list[t0],  a: action_list[t0], r : reward, f: val, \
+						fc: state_list[t0+1], ts: done, g:gate, s:t1-t0+1, lr: lr_multiplier})
+					
+					base_pred_loss += np.mean(np.square(state_list[t0+1]-state_list[t0]))
 					pred_loss_total += pred_loss
 
 				obs_list    = obs_list[1:]
@@ -264,100 +274,31 @@ def main(gpu_id=None):
 				reward_list = reward_list[1:]
 				done_list   = done_list[1:]
 
-			if fr%par['n_step'] == 0 and fr >= par['n_step']+1:
-				# sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
-				pass
 
-			if fr%par['gate_reset']==0 and fr>0:
-				sess.run(model.update_weights, feed_dict = {lr: lr_multiplier})
-				gate = np.random.choice([0. , 1/(1-par['drop_rate'])], size = [par['batch_size'], \
-					par['n_latent']], p=[par['drop_rate'], 1 - par['drop_rate']])
-				#gate = np.ones_like(gate)
-
+			# Slide reward list
 			if len(reward_list_full) >= 1000:
 				reward_list_full = reward_list_full[1:]
+
+			# Trigger weight update and generate a new gating pattern
+			if fr%par['gate_reset']==0 and fr>0:
+				sess.run(model.update_weights, feed_dict={lr:lr_multiplier})
+				gate = generate_gate(par['n_hidden'])
+
+			# Show performance
 			if fr%1000==0:
-				print('Frame {:>7} | Policy {} | Reward {:5.3f} | Overall HS: {:>4} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
-					fr, np.round(np.mean(pol,axis=0),2), np.mean(reward_list_full), int(high_score.max()), int(agent_score.max()), np.mean(final_agent_score)))
-				print(' '*14 + '| Pred Loss {:5.3f}'.format(pred_loss_total))
+				print('Frame {:>7} | Policy {} | Current HS: {:>4} | Mean Final HS: {:7.2f}'.format(\
+					fr, np.round(np.mean(pol,axis=0),2), int(agent_score.max()), np.mean(final_agent_score)))
+				print(' '*14 + '| Reward {:5.3f} | Pred Loss {:7.5f} (base {:7.5f})'.format(\
+					np.mean(reward_list_full), pred_loss_total, base_pred_loss))
+				
 				weights = sess.run(model.var_dict)
-				fn = './savedir/weights_batch{}_drop5{}_reset{}_iter0.pkl'.format(par['batch_size'], \
-					int(par['drop_rate']*10), par['gate_reset'])
-				pickle.dump(weights, open(fn,'wb'))
+				fn = './savedir/capsule_weights_batch{}_5drop{}_kernel{}_predcost{:0>4}'.format(\
+					par['batch_size'], int(par['drop_rate']*100), par['kernel_size'], int(par['pred_cost']*1000))
+				pickle.dump({'weights':weights, 'par':par}, open(fn+'.pkl','wb'))
 
+			# Record video
 			if fr%20000 == 0 and fr != 0:
-
-				obs_list = []
-				action_list = []
-				reward_list = []
-				done_list = []
-
-				N = 10
-				render_done       = np.zeros([par['batch_size'], N], dtype=np.float32)
-				render_reward     = np.zeros([par['batch_size'], N], dtype=np.float32)
-				render_best_score = np.zeros([par['batch_size'], N], dtype=np.float32)
-
-				for k in range(N):
-					render_fr_count = 1
-
-					if k == 0:
-						print('\nRendering video...')
-						dirname = environment.start_render(fr)
-					else:
-						environment.start_render(fr, render=False)
-
-					render_obs = environment.reset_environments()
-
-					while np.any(render_done[:,k] == 0.):
-
-						render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:np.ones_like(gate)})
-						render_action = np.array(np.stack([np.random.multinomial(1, render_pol[i,:]-1e-6) for i in range(par['batch_size'])]))
-
-						for _ in range(par['k_skip']):
-							render_fr_count += 1
-							render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(render_action)
-
-							render_reward_frame = np.squeeze(render_reward_frame)
-							render_done_frame = np.squeeze(render_done_frame)
-
-							# Update record states
-							render_reward[:,k] += render_reward_frame
-							render_done[:,k]   += render_done_frame
-
-							# Update high score
-							render_best_score[:,k] = np.maximum(render_best_score[:,k], render_reward[:,k])
-
-							# End environments as necessary
-							render_reward[:,k] *= (1-render_done_frame)
-
-						# Stop rendering if too many frames have elapsed
-						if render_fr_count > 50000:
-							break
-
-					if k == 0:
-						environment.stop_render()
-					else:
-						environment.stop_render(render=False)
-
-				render_mean_score = np.mean(render_best_score)
-				render_high_score = int(render_best_score.max())
-				render_best_agent = np.where(np.squeeze(render_best_score[:,0]==render_best_score[:,0].max()))[0]
-
-				line0 = 'Recorded at Training Frame {}'.format(fr)
-				line1 = 'High Score: {}       [Agent(s) {}]'.format(render_high_score, render_best_agent)
-				line2 = 'Mean Score: {}'.format(render_mean_score)
-				line3 = 'Agent ID / Personal Best'
-				lines = ['{:>8} / {}'.format(int(ag), int(bs)) for ag, bs \
-					in enumerate(np.squeeze(render_best_score[:,0]))]
-
-				text = [line0, line1, line2, line3] + lines
-				text = '\n'.join(text)
-				with open(dirname+'performance_record.txt', 'w') as tfile:
-					tfile.write(text)
-
-				print('Rendered {} frames with a high score of {} (mean {}).'.format(\
-					render_fr_count, render_high_score, render_mean_score))
-				print('Rendering complete.\n')
+				render_agent(sess, model, environment, gate, fr, x, g)
 
 
 def print_key_params():
@@ -369,6 +310,87 @@ def print_key_params():
 	for k in key_params:
 		print(k.ljust(30), ':', par[k])
 	print('-'*60 + '\n')
+
+
+def generate_gate(n=par['n_latent']):
+	return np.random.choice([0., 1/(1-par['drop_rate'])], \
+			size=[2, par['batch_size'], n], \
+			p=[par['drop_rate'], 1-par['drop_rate']])
+
+
+def render_agent(sess, model, environment, gate, fr, x, g):
+
+	obs_list    = []
+	action_list = []
+	reward_list = []
+	done_list   = []
+
+	N = 10
+	render_done       = np.zeros([par['batch_size'], N], dtype=np.float32)
+	render_reward     = np.zeros([par['batch_size'], N], dtype=np.float32)
+	render_best_score = np.zeros([par['batch_size'], N], dtype=np.float32)
+
+	for k in range(N):
+		render_fr_count = 1
+
+		if k == 0:
+			print('\nRendering video...')
+			dirname = environment.start_render(fr)
+		else:
+			environment.start_render(fr, render=False)
+
+		render_obs = environment.reset_environments()
+
+		while np.any(render_done[:,k] == 0.):
+
+			render_pol = sess.run(model.pol, feed_dict={x:render_obs, g:np.ones_like(gate)})
+			render_action = np.array(np.stack([np.random.multinomial(1, render_pol[i,:]-1e-6) for i in range(par['batch_size'])]))
+
+			for _ in range(par['k_skip']):
+				render_fr_count += 1
+				render_obs, render_reward_frame, _, render_done_frame = environment.agent_action(render_action)
+
+				render_reward_frame = np.squeeze(render_reward_frame)
+				render_done_frame = np.squeeze(render_done_frame)
+
+				# Update record states
+				render_reward[:,k] += render_reward_frame
+				render_done[:,k]   += render_done_frame
+
+				# Update high score
+				render_best_score[:,k] = np.maximum(render_best_score[:,k], render_reward[:,k])
+
+				# End environments as necessary
+				render_reward[:,k] *= (1-render_done_frame)
+
+			# Stop rendering if too many frames have elapsed
+			if render_fr_count > 50000:
+				break
+
+		if k == 0:
+			environment.stop_render()
+		else:
+			environment.stop_render(render=False)
+
+	render_mean_score = np.mean(render_best_score)
+	render_high_score = int(render_best_score.max())
+	render_best_agent = np.where(np.squeeze(render_best_score[:,0]==render_best_score[:,0].max()))[0]
+
+	line0 = 'Recorded at Training Frame {}'.format(fr)
+	line1 = 'High Score: {}       [Agent(s) {}]'.format(render_high_score, render_best_agent)
+	line2 = 'Mean Score: {}'.format(render_mean_score)
+	line3 = 'Agent ID / Personal Best'
+	lines = ['{:>8} / {}'.format(int(ag), int(bs)) for ag, bs \
+		in enumerate(np.squeeze(render_best_score[:,0]))]
+
+	text = [line0, line1, line2, line3] + lines
+	text = '\n'.join(text)
+	with open(dirname+'performance_record.txt', 'w') as tfile:
+		tfile.write(text)
+
+	print('Rendered {} frames with a high score of {} (mean {}).'.format(\
+		render_fr_count, render_high_score, render_mean_score))
+	print('Rendering complete.\n')
 
 
 if __name__ == '__main__':
